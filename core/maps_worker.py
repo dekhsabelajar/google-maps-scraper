@@ -11,6 +11,8 @@ Adheres strictly to PRD:
 import asyncio
 import random
 import logging
+import sys
+import subprocess
 from typing import List, Dict, Any, Optional, Callable
 from urllib.parse import quote_plus
 
@@ -88,11 +90,26 @@ class MapsWorker:
             ]
             proxy_config = {"server": self.proxy_url} if self.proxy_url else None
 
-            browser: Browser = await p.chromium.launch(
-                headless=self.headless,
-                args=launch_args,
-                proxy=proxy_config,
-            )
+            try:
+                browser: Browser = await p.chromium.launch(
+                    headless=self.headless,
+                    args=launch_args,
+                    proxy=proxy_config,
+                )
+            except Exception as launch_err:
+                err_str = str(launch_err)
+                if "Executable doesn't exist" in err_str or "playwright install" in err_str:
+                    logger.warning("Playwright Chromium binary not found. Automatically downloading browser...")
+                    sub_proc = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], capture_output=True, text=True)
+                    if sub_proc.returncode != 0:
+                        logger.error(f"Auto-install failed: {sub_proc.stderr}")
+                    browser = await p.chromium.launch(
+                        headless=self.headless,
+                        args=launch_args,
+                        proxy=proxy_config,
+                    )
+                else:
+                    raise launch_err
 
             context: BrowserContext = await browser.new_context(
                 user_agent=settings.USER_AGENT,
