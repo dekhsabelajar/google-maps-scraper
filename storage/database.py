@@ -15,6 +15,8 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Float,
+    Integer,
     Enum as SAEnum,
     Index,
     select,
@@ -47,6 +49,8 @@ class BusinessEntity(Base):
     address = Column(Text, nullable=True)
     phone_number = Column(String(50), nullable=True)
     website_url = Column(Text, nullable=True)
+    rating = Column(Float, nullable=True)
+    reviews_count = Column(Integer, nullable=True)
     extracted_emails = Column(Text, nullable=True)  # Stored as JSON string
     enrichment_status = Column(SAEnum(EnrichmentStatus), nullable=False, default=EnrichmentStatus.PENDING)
     scraped_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -73,6 +77,8 @@ class BusinessEntity(Base):
             "address": self.address,
             "phone_number": self.phone_number,
             "website_url": self.website_url,
+            "rating": self.rating,
+            "reviews_count": self.reviews_count,
             "extracted_emails": emails,
             "enrichment_status": self.enrichment_status.value if hasattr(self.enrichment_status, "value") else str(self.enrichment_status),
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
@@ -113,6 +119,8 @@ class DatabaseManager:
         address: Optional[str] = None,
         phone_number: Optional[str] = None,
         website_url: Optional[str] = None,
+        rating: Optional[float] = None,
+        reviews_count: Optional[int] = None,
         enrichment_status: Optional[EnrichmentStatus] = None,
     ) -> Tuple[BusinessEntity, bool]:
         """
@@ -148,6 +156,10 @@ class DatabaseManager:
                     existing.website_url = website_url
                     if existing.enrichment_status == EnrichmentStatus.NO_WEBSITE:
                         existing.enrichment_status = EnrichmentStatus.PENDING
+                if rating is not None:
+                    existing.rating = rating
+                if reviews_count is not None:
+                    existing.reviews_count = reviews_count
 
                 session.commit()
                 return existing, False
@@ -160,6 +172,8 @@ class DatabaseManager:
                 address=address,
                 phone_number=phone_number,
                 website_url=website_url,
+                rating=rating,
+                reviews_count=reviews_count,
                 enrichment_status=initial_status,
                 scraped_at=datetime.now(timezone.utc),
                 dedup_hash=dedup_hash,

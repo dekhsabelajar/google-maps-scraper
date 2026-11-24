@@ -13,6 +13,7 @@ import random
 import logging
 import sys
 import subprocess
+import re
 from typing import List, Dict, Any, Optional, Callable
 from urllib.parse import quote_plus
 
@@ -331,6 +332,55 @@ class MapsWorker:
                         website_raw = href.strip()
                         break
 
+            # 6. Rating & Total Reviews
+            rating = None
+            reviews_count = None
+            try:
+                # Rating score
+                r_el = page.locator("div.F7nice span[aria-hidden='true']").first
+                if await r_el.count() > 0:
+                    r_text = await r_el.text_content()
+                    if r_text:
+                        try:
+                            rating = float(r_text.strip().replace(",", "."))
+                        except ValueError:
+                            pass
+                
+                if rating is None:
+                    star_el = page.locator("span[aria-label*='bintang'], span[aria-label*='stars']").first
+                    if await star_el.count() > 0:
+                        star_label = await star_el.get_attribute("aria-label")
+                        if star_label:
+                            m = re.search(r"(\d+([.,]\d+)?)", star_label)
+                            if m:
+                                try:
+                                    rating = float(m.group(1).replace(",", "."))
+                                except ValueError:
+                                    pass
+
+                # Total reviews count
+                rev_locators = [
+                    "div.F7nice span[aria-label*='ulasan']",
+                    "div.F7nice span[aria-label*='review']",
+                    "span[aria-label*='ulasan']",
+                    "span[aria-label*='reviews']",
+                    "button[jsaction*='pane.reviewChart.moreReviews']",
+                ]
+                for rev_sel in rev_locators:
+                    rev_elem = page.locator(rev_sel).first
+                    if await rev_elem.count() > 0:
+                        aria = await rev_elem.get_attribute("aria-label") or ""
+                        txt = await rev_elem.text_content() or ""
+                        combined_rev = f"{aria} {txt}"
+                        m_rev = re.search(r"([\d\.,]+)\s*(?:ulasan|reviews|review)?", combined_rev, re.IGNORECASE)
+                        if m_rev:
+                            clean_cnt = m_rev.group(1).replace(".", "").replace(",", "").strip()
+                            if clean_cnt.isdigit():
+                                reviews_count = int(clean_cnt)
+                                break
+            except Exception as e_rev:
+                logger.debug(f"Error extracting reviews/rating: {e_rev}")
+
             # Standardize & Normalize
             phone_normalized = normalize_phone_number(phone_raw)
             website_normalized = normalize_url(website_raw)
@@ -349,6 +399,8 @@ class MapsWorker:
                 address=address,
                 phone_number=phone_normalized,
                 website_url=website_normalized,
+                rating=rating,
+                reviews_count=reviews_count,
                 enrichment_status=enrich_status,
             )
 

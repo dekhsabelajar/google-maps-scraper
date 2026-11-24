@@ -26,6 +26,8 @@ def export_to_csv(entities: List[Dict[str, Any]], output_path: Optional[Path] = 
         "search_keyword",
         "business_name",
         "category",
+        "rating",
+        "reviews_count",
         "address",
         "phone_number",
         "website_url",
