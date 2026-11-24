@@ -305,8 +305,14 @@ st.markdown(
 summary_df = load_summary_data()
 
 # --- TOP EXECUTIVE METRIC TILES ---
-total_sample = int(summary_df["total_sample_scraped"].sum()) if not summary_df.empty else 127
+total_sample = int(summary_df["total_sample_scraped"].sum()) if not summary_df.empty else 605
 top_niche_reviews = summary_df.loc[summary_df["avg_reviews"].idxmax()] if not summary_df.empty else None
+top_avg_val = f"{top_niche_reviews['avg_reviews']:.1f} Ulasan" if top_niche_reviews is not None else "-"
+top_avg_name = f"{top_niche_reviews['niche_name']} (Rata-rata)" if top_niche_reviews is not None else "-"
+
+max_rev_row = summary_df.loc[summary_df["max_reviews"].idxmax()] if not summary_df.empty else None
+max_rev_val = f"{int(max_rev_row['max_reviews']):,} Ulasan".replace(",", ".") if max_rev_row is not None else "-"
+max_rev_name = f"{max_rev_row['top_active_business'].split('(')[0].strip()}" if max_rev_row is not None else "-"
 
 col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
 with col_kpi1:
@@ -333,22 +339,22 @@ with col_kpi2:
     )
 with col_kpi3:
     st.markdown(
-        """
+        f"""
         <div class="metric-card">
             <div class="metric-title">Aktivitas Ulasan Tertinggi</div>
-            <div class="metric-value">633.7 Ulasan</div>
-            <div class="metric-sub">Percetakan Digital (Rata-rata)</div>
+            <div class="metric-value">{top_avg_val}</div>
+            <div class="metric-sub">{top_avg_name}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 with col_kpi4:
     st.markdown(
-        """
+        f"""
         <div class="metric-card">
             <div class="metric-title">Volume Review Maksimum</div>
-            <div class="metric-value">2,792 Ulasan</div>
-            <div class="metric-sub">Mangrove Printing Jogja</div>
+            <div class="metric-value">{max_rev_val}</div>
+            <div class="metric-sub">{max_rev_name}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -506,9 +512,9 @@ with tab1:
         """
         <div class="callout-box">
             <strong>Kesimpulan Strategis Matriks Prioritas:</strong><br>
-            • <strong>Peluang Tier 1 (Sweet Spot):</strong> <em>Rental Kendaraan & Kamera</em> (Saturasi 20%, 239.7 avg reviews) dan <em>Car Wash</em> (Saturasi 26%, 201.7 avg reviews). Pasar ini memiliki volume interaksi ulasan tinggi namun kompetisi SaaS lokal masih sangat rendah.<br>
-            • <strong>Peluang Efisiensi SPK:</strong> <em>Percetakan Digital</em> memiliki volume review tertinggi (633.7 avg reviews; top: 2,792 reviews), mencerminkan lalu lintas pelanggan yang masif namun sistem saat ini didominasi software desktop PC lawas.<br>
-            • <strong>Zona Kompetisi Tinggi (Red Ocean):</strong> <em>Barbershop & Salon</em> memiliki tingkat kejenuhan 88% akibat penetrasi agresif raksasa POS (Majoo, Olsera, Fresha).
+            • <strong>Peluang Tier 1 (Sweet Spot):</strong> <em>Rental Kendaraan & Kamera</em> (103 entitas, saturasi 20%, top: 2.468 ulasan) dan <em>Car Wash</em> (88 entitas, saturasi 26%, top: 1.779 ulasan). Pasar ini memiliki volume interaksi ulasan tinggi namun kompetisi SaaS lokal masih sangat rendah.<br>
+            • <strong>Peluang Efisiensi SPK & Tracking:</strong> <em>Percetakan Digital</em> (89 entitas, 351.8 avg ulasan; top: 2.792 ulasan) dan <em>Barbershop & Salon</em> (90 entitas, 497.0 avg ulasan; top: 4.395 ulasan) mencerminkan perputaran pelanggan yang sangat masif di wilayah DIY-Jateng.<br>
+            • <strong>Zona Kompetisi Tinggi (Red Ocean POS):</strong> Segmen <em>Barbershop & Salon</em> jenuh (88% saturasi POS generik), memerlukan positioning mikro khusus reservasi kapster 3-mingguan tanpa instal aplikasi.
         </div>
         """,
         unsafe_allow_html=True,

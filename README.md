@@ -217,16 +217,16 @@ streamlit run app.py
 
 ## 9. Dataset Riset Pasar B2B Micro-SaaS (7 Niche)
 
-Data scraping empiris di wilayah DI Yogyakarta, Magelang, dan Klaten tersimpan pada folder `exports/`:
-- `niche_1_kost_eksklusif.csv`: 19 entitas, avg review 60.9 (top: Kost M - 314 reviews)
-- `niche_2_gym_kebugaran.csv`: 18 entitas, avg review 164.8 (top: WGYM - 634 reviews)
-- `niche_3_rental_kendaraan_kamera.csv`: 18 entitas, avg review 239.7 (top: JOGJAKAMERA - 1,445 reviews)
-- `niche_4_barbershop_salon.csv`: 18 entitas, avg review 297.0 (top: BarberKing Klaten - 1,393 reviews)
-- `niche_5_percetakan_digital.csv`: 18 entitas, avg review 633.7 (top: Mangrove Printing - 2,792 reviews)
-- `niche_6_car_wash.csv`: 18 entitas, avg review 201.7 (top: DK Car Wash - 1,779 reviews)
-- `niche_7_pet_shop_vet.csv`: 18 entitas, avg review 422.7 (top: Klinik Hewan Jogja - 2,236 reviews)
-- `master_7_niches_summary.csv`: Ringkasan benchmark komparatif seluruh niche.
-- `all_7_niches_contacts.csv`: Seluruh 127 baris kontak entitas bisnis gabungan.
+Data scraping empiris mendalam (605 entitas bisnis unik) di wilayah DI Yogyakarta (Yogyakarta, Sleman, Bantul), Magelang, dan Klaten tersimpan pada folder `exports/`:
+- `niche_1_kost_eksklusif.csv`: 86 entitas, avg review 67.7 (top: Pinnacle Co-Living - 1,596 reviews)
+- `niche_2_gym_kebugaran.csv`: 80 entitas, avg review 194.6 (top: One Time Pilates - 1,720 reviews)
+- `niche_3_rental_kendaraan_kamera.csv`: 103 entitas, avg review 156.3 (top: Global Rental Motor - 2,468 reviews)
+- `niche_4_barbershop_salon.csv`: 90 entitas, avg review 497.0 (top: Daisy Beauty Salon By Debby - 4,395 reviews)
+- `niche_5_percetakan_digital.csv`: 89 entitas, avg review 351.8 (top: Mangrove Printing - 2,792 reviews)
+- `niche_6_car_wash.csv`: 88 entitas, avg review 146.5 (top: DK Car Wash - 1,779 reviews)
+- `niche_7_pet_shop_vet.csv`: 69 entitas, avg review 252.3 (top: Klinik Hewan Jogja - 2,236 reviews)
+- `master_7_niches_summary.csv`: Ringkasan benchmark komparatif seluruh 7 niche bisnis.
+- `all_7_niches_contacts.csv`: Seluruh 605 baris kontak entitas bisnis gabungan.
 
 ---
 

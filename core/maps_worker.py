@@ -143,56 +143,18 @@ class MapsWorker:
 
                 feed_locator = page.locator(feed_selector)
 
-                # Scroll and collect items loop
-                processed_place_urls = set()
+                # Phase 1: Scroll feed to load candidate place links
+                logger.info(f"Scrolling feed to load candidate places for keyword '{keyword}' (target: {target_limit})...")
+                last_link_count = 0
                 unchanged_cycles = 0
-                last_count = 0
 
-                while len(results) < target_limit:
-                    # Collect all place links directly (resilient to container markup variations)
+                for scroll_step in range(40):
+                    # Check candidate link count
                     place_links = await page.locator("div[role='feed'] a[href*='/maps/place/']").all()
-                    if not place_links:
-                        place_links = await page.locator("a[href*='/maps/place/']").all()
-
                     current_count = len(place_links)
-                    logger.info(f"Loaded {current_count} candidate links in feed (extracted: {len(results)}/{target_limit})")
-
-                    # Process newly visible links
-                    for link in place_links:
-                        if len(results) >= target_limit:
-                            break
-
-                        try:
-                            href = await link.get_attribute("href")
-                            card_id = (href or "").split("?")[0]
-                            if card_id and card_id in processed_place_urls:
-                                continue
-
-                            link_name = await link.get_attribute("aria-label")
-                            if not link_name or link_name.strip() in ["Hasil", "Results", ""]:
-                                continue
-
-                            logger.info(f"Navigating to place: {link_name}")
-                            # Click link directly to open detail pane
-                            await link.click(timeout=3000, force=True)
-                            if card_id:
-                                processed_place_urls.add(card_id)
-
-                            await self._random_delay(1.5, 2.5)
-
-                            # Extract detail pane
-                            item_data = await self._extract_detail_pane(page, keyword, fallback_name=link_name.strip())
-                            if item_data and item_data.get("business_name"):
-                                results.append(item_data)
-                                if on_progress:
-                                    on_progress(item_data)
-                                logger.info(f"[{len(results)}/{target_limit}] Extracted: {item_data.get('business_name')} (Rating: {item_data.get('rating')}, Reviews: {item_data.get('reviews_count')})")
-
-                        except Exception as e:
-                            logger.warning(f"Failed to process place link: {e}")
-                            continue
-
-                    if len(results) >= target_limit:
+                    
+                    if current_count >= target_limit:
+                        logger.info(f"Reached target candidate count ({current_count} >= {target_limit}). Proceeding to extraction.")
                         break
 
                     # Check for end of list text
@@ -203,32 +165,66 @@ class MapsWorker:
                     ]
                     page_text = await page.content()
                     if any(indicator in page_text for indicator in end_indicators):
-                        logger.info("Reached end of Google Maps results feed.")
+                        logger.info(f"Reached end of Google Maps feed. Total candidates loaded: {current_count}")
                         break
 
-                    # Scroll feed down using mouse wheel or keyboard PageDown
-                    try:
-                        box = await feed_locator.bounding_box()
-                        if box:
-                            await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-                            await page.mouse.wheel(0, 1200)
-                        else:
-                            await page.keyboard.press("PageDown")
-                    except Exception:
-                        await page.keyboard.press("PageDown")
-
-                    await self._random_delay(2.0, 4.0)
-
-                    # Check if feed is stuck
-                    cards_after_scroll = await page.locator("div[role='feed'] div[role='article']").count()
-                    if cards_after_scroll == last_count:
+                    if current_count == last_link_count and current_count > 0:
                         unchanged_cycles += 1
-                        if unchanged_cycles >= 3:
-                            logger.info("Feed count did not increase after 3 scroll attempts. Stopping scroll.")
+                        if unchanged_cycles >= 4:
+                            logger.info(f"Feed did not expand after 4 scrolls. Total candidates: {current_count}")
                             break
                     else:
                         unchanged_cycles = 0
-                        last_count = cards_after_scroll
+                        last_link_count = current_count
+
+                    # Smooth direct feed scroll
+                    try:
+                        await page.evaluate("const f = document.querySelector('div[role=\"feed\"]'); if(f) f.scrollBy(0, 3500);")
+                    except Exception:
+                        await page.keyboard.press("PageDown")
+
+                    await self._random_delay(1.0, 1.8)
+
+                # Phase 2: Extract details for each candidate link
+                place_links = await page.locator("div[role='feed'] a[href*='/maps/place/']").all()
+                if not place_links:
+                    place_links = await page.locator("a[href*='/maps/place/']").all()
+
+                logger.info(f"Beginning detail extraction for {len(place_links)} places (target: {target_limit})...")
+                processed_place_urls = set()
+
+                for link in place_links:
+                    if len(results) >= target_limit:
+                        break
+
+                    try:
+                        href = await link.get_attribute("href")
+                        card_id = (href or "").split("?")[0]
+                        if card_id and card_id in processed_place_urls:
+                            continue
+
+                        link_name = await link.get_attribute("aria-label")
+                        if not link_name or link_name.strip() in ["Hasil", "Results", ""]:
+                            continue
+
+                        # Click link directly to open detail pane
+                        await link.click(timeout=3000, force=True)
+                        if card_id:
+                            processed_place_urls.add(card_id)
+
+                        await self._random_delay(0.8, 1.4)
+
+                        # Extract detail pane
+                        item_data = await self._extract_detail_pane(page, keyword, fallback_name=link_name.strip())
+                        if item_data and item_data.get("business_name"):
+                            results.append(item_data)
+                            if on_progress:
+                                on_progress(item_data)
+                            logger.info(f"[{len(results)}/{target_limit}] Extracted: {item_data.get('business_name')} (Rating: {item_data.get('rating')}, Reviews: {item_data.get('reviews_count')})")
+
+                    except Exception as e:
+                        logger.warning(f"Failed to process place link: {e}")
+                        continue
 
             except Exception as e:
                 logger.error(f"Error during Google Maps extraction: {e}", exc_info=True)
