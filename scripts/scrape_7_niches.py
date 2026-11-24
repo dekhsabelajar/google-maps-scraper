@@ -4,8 +4,14 @@ Extracts business entities, phone numbers, websites, ratings, and total review c
 """
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from typing import List, Dict, Any
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.maps_worker import MapsWorker
 from storage.database import DatabaseManager
@@ -18,9 +24,9 @@ NICHES = [
     {
         "id": 1,
         "niche": "Kost Eksklusif",
+        "slug": "kost_eksklusif",
         "keywords": [
             "Kost eksklusif Jogja",
-            "Kost eksklusif Sleman",
             "Kost eksklusif Magelang",
             "Kost eksklusif Klaten",
         ]
@@ -28,9 +34,9 @@ NICHES = [
     {
         "id": 2,
         "niche": "Gym & Pusat Kebugaran",
+        "slug": "gym_kebugaran",
         "keywords": [
             "Gym Yogyakarta",
-            "Fitness Sleman",
             "Gym Magelang",
             "Gym Klaten",
         ]
@@ -38,9 +44,9 @@ NICHES = [
     {
         "id": 3,
         "niche": "Rental Kendaraan & Kamera",
+        "slug": "rental_kendaraan_kamera",
         "keywords": [
-            "Rental kamera Jogja",
-            "Rental mobil motor Sleman",
+            "Rental kamera mobil Jogja",
             "Rental mobil Magelang",
             "Rental mobil Klaten",
         ]
@@ -48,9 +54,9 @@ NICHES = [
     {
         "id": 4,
         "niche": "Barbershop & Salon",
+        "slug": "barbershop_salon",
         "keywords": [
             "Barbershop Jogja",
-            "Salon kecantikan Sleman",
             "Barbershop Magelang",
             "Barbershop Klaten",
         ]
@@ -58,9 +64,9 @@ NICHES = [
     {
         "id": 5,
         "niche": "Percetakan Digital",
+        "slug": "percetakan_digital",
         "keywords": [
             "Percetakan digital Jogja",
-            "Digital printing Sleman",
             "Percetakan Magelang",
             "Percetakan Klaten",
         ]
@@ -68,9 +74,9 @@ NICHES = [
     {
         "id": 6,
         "niche": "Car Wash",
+        "slug": "car_wash",
         "keywords": [
             "Car wash Jogja",
-            "Cuci mobil Sleman",
             "Car wash Magelang",
             "Cuci mobil Klaten",
         ]
@@ -78,9 +84,9 @@ NICHES = [
     {
         "id": 7,
         "niche": "Pet Shop, Grooming, & Vet",
+        "slug": "pet_shop_vet",
         "keywords": [
             "Pet shop Jogja",
-            "Grooming hewan Sleman",
             "Klinik hewan Magelang",
             "Pet shop Klaten",
         ]
@@ -88,10 +94,11 @@ NICHES = [
 ]
 
 
-async def run_batch_scrape(limit_per_keyword: int = 15):
+async def run_batch_scrape(limit_per_keyword: int = 6):
     db = DatabaseManager()
     worker = MapsWorker(db_manager=db, headless=True)
     summary_data = []
+    all_combined_entities = []
 
     print("======================================================================")
     print("STARTING BATCH SCRAPER FOR 7 B2B NICHE (DIY, MAGELANG, KLATEN)")
@@ -99,57 +106,99 @@ async def run_batch_scrape(limit_per_keyword: int = 15):
 
     for item in NICHES:
         niche_name = item["niche"]
+        slug = item["slug"]
         keywords = item["keywords"]
         print(f"\n>>> Memproses Niche #{item['id']}: {niche_name}")
-        niche_entities: List[Dict[str, Any]] = []
 
         for kw in keywords:
             print(f"  -> Scraping: '{kw}' (target: {limit_per_keyword})...")
             try:
-                results = await worker.search_and_extract(
+                await worker.search_and_extract(
                     keyword=kw,
                     limit=limit_per_keyword
                 )
-                niche_entities.extend(results)
             except Exception as e:
                 logger.error(f"Error scraping '{kw}': {e}")
 
-        # Export per niche
-        safe_name = "".join(c if c.isalnum() else "_" for c in niche_name).lower()
-        csv_path = Path("exports") / f"leads_niche_{item['id']}_{safe_name}.csv"
-        json_path = Path("exports") / f"leads_niche_{item['id']}_{safe_name}.json"
-        
-        # Get all unique entities from DB matching keywords
-        niche_all = []
+        # Collect unique entities from DB matching this niche's keywords
+        niche_entities = []
         seen_ids = set()
         for kw in keywords:
             for ent in db.get_all_entities_as_dicts(keyword=kw):
                 if ent["id"] not in seen_ids:
                     seen_ids.add(ent["id"])
-                    niche_all.append(ent)
+                    # Tag with niche name
+                    ent["niche"] = niche_name
+                    niche_entities.append(ent)
+                    all_combined_entities.append(ent)
 
-        if niche_all:
-            export_to_csv(niche_all, output_path=csv_path)
-            export_to_json(niche_all, output_path=json_path)
+        # Export individual niche CSV & JSON
+        csv_path = Path("exports") / f"niche_{item['id']}_{slug}.csv"
+        json_path = Path("exports") / f"niche_{item['id']}_{slug}.json"
+        if niche_entities:
+            export_to_csv(niche_entities, output_path=csv_path)
+            export_to_json(niche_entities, output_path=json_path)
 
-        avg_reviews = 0
-        rev_list = [e.get("reviews_count") for e in niche_all if e.get("reviews_count")]
-        if rev_list:
-            avg_reviews = sum(rev_list) / len(rev_list)
+        # Calculate statistics
+        ratings = [e["rating"] for e in niche_entities if e.get("rating")]
+        reviews = [e["reviews_count"] for e in niche_entities if e.get("reviews_count")]
+
+        avg_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+        avg_reviews = round(sum(reviews) / len(reviews), 1) if reviews else 0.0
+        max_reviews = max(reviews) if reviews else 0
+
+        # Find most active business
+        top_business = "-"
+        if reviews:
+            sorted_by_rev = sorted(niche_entities, key=lambda x: (x.get("reviews_count") or 0), reverse=True)
+            top_business = f"{sorted_by_rev[0]['business_name']} ({sorted_by_rev[0].get('reviews_count')} reviews)"
+
+        # Region distribution
+        diy_count = sum(1 for e in niche_entities if any(loc in (e.get("address") or "") + (e.get("search_keyword") or "") for loc in ["Jogja", "Yogyakarta", "Sleman", "Bantul"]))
+        magelang_count = sum(1 for e in niche_entities if "Magelang" in (e.get("address") or "") + (e.get("search_keyword") or ""))
+        klaten_count = sum(1 for e in niche_entities if "Klaten" in (e.get("address") or "") + (e.get("search_keyword") or ""))
 
         summary_data.append({
-            "niche": niche_name,
-            "total_entities": len(niche_all),
-            "avg_reviews": round(avg_reviews, 1),
-            "csv_file": str(csv_path)
+            "niche_id": item["id"],
+            "niche_name": niche_name,
+            "total_sample_scraped": len(niche_entities),
+            "avg_rating": avg_rating,
+            "avg_reviews": avg_reviews,
+            "max_reviews": max_reviews,
+            "top_active_business": top_business,
+            "diy_sample": diy_count,
+            "magelang_sample": magelang_count,
+            "klaten_sample": klaten_count,
+            "csv_path": str(csv_path),
         })
 
+    # Export master aggregated CSV
+    if all_combined_entities:
+        all_csv = Path("exports") / "all_7_niches_contacts.csv"
+        export_to_csv(all_combined_entities, output_path=all_csv)
+        print(f"\n[SUCCESS] Aggregated dataset saved to: {all_csv}")
+
+    # Export master summary CSV
+    import csv
+    summary_csv = Path("exports") / "master_7_niches_summary.csv"
+    with open(summary_csv, "w", newline="", encoding="utf-8-sig") as f:
+        fieldnames = [
+            "niche_id", "niche_name", "total_sample_scraped",
+            "avg_rating", "avg_reviews", "max_reviews",
+            "top_active_business", "diy_sample", "magelang_sample", "klaten_sample", "csv_path"
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in summary_data:
+            writer.writerow(row)
+
+    print(f"[SUCCESS] Master summary saved to: {summary_csv}")
     print("\n======================================================================")
-    print("RINGKASAN HASIL SCRAPING 7 NICHE")
+    print("RINGKASAN HASIL SCRAPING 7 NICHE (DIY, MAGELANG, KLATEN)")
     print("======================================================================")
     for s in summary_data:
-        print(f"- {s['niche']}: {s['total_entities']} entitas | Rata-rata review: {s['avg_reviews']} | File: {s['csv_file']}")
+        print(f"#{s['niche_id']} {s['niche_name']}: {s['total_sample_scraped']} entitas | Rata-rata Review: {s['avg_reviews']} | Top: {s['top_active_business']}")
 
 
 if __name__ == "__main__":
-    asyncio.run(run_batch_scrape(limit_per_keyword=15))
+    asyncio.run(run_batch_scrape(limit_per_keyword=6))

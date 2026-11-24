@@ -149,51 +149,47 @@ class MapsWorker:
                 last_count = 0
 
                 while len(results) < target_limit:
-                    # Collect all business entry cards or links
-                    cards = await page.locator("div[role='feed'] div[role='article']").all()
-                    if not cards:
-                        # Fallback: links containing /maps/place/
-                        cards = await page.locator("div[role='feed'] a[href*='/maps/place/']").all()
+                    # Collect all place links directly (resilient to container markup variations)
+                    place_links = await page.locator("div[role='feed'] a[href*='/maps/place/']").all()
+                    if not place_links:
+                        place_links = await page.locator("a[href*='/maps/place/']").all()
 
-                    current_count = len(cards)
-                    logger.info(f"Loaded {current_count} candidate cards in feed (extracted: {len(results)}/{target_limit})")
+                    current_count = len(place_links)
+                    logger.info(f"Loaded {current_count} candidate links in feed (extracted: {len(results)}/{target_limit})")
 
-                    # Process newly visible cards
-                    for card in cards:
+                    # Process newly visible links
+                    for link in place_links:
                         if len(results) >= target_limit:
                             break
 
                         try:
-                            # Try finding the primary link or click target
-                            link_elem = card.locator("a[href*='/maps/place/']").first
-                            if await link_elem.count() > 0:
-                                href = await link_elem.get_attribute("href")
-                            else:
-                                href = await card.get_attribute("href")
-
-                            # Simple card deduplication by URL identifier
+                            href = await link.get_attribute("href")
                             card_id = (href or "").split("?")[0]
                             if card_id and card_id in processed_place_urls:
                                 continue
 
-                            # Click card to open detail pane
-                            await card.scroll_into_view_if_needed(timeout=2000)
-                            await card.click(timeout=3000)
+                            link_name = await link.get_attribute("aria-label")
+                            if not link_name or link_name.strip() in ["Hasil", "Results", ""]:
+                                continue
+
+                            logger.info(f"Navigating to place: {link_name}")
+                            # Click link directly to open detail pane
+                            await link.click(timeout=3000, force=True)
                             if card_id:
                                 processed_place_urls.add(card_id)
 
-                            await self._random_delay(1.5, 3.0)
+                            await self._random_delay(1.5, 2.5)
 
                             # Extract detail pane
-                            item_data = await self._extract_detail_pane(page, keyword)
+                            item_data = await self._extract_detail_pane(page, keyword, fallback_name=link_name.strip())
                             if item_data and item_data.get("business_name"):
                                 results.append(item_data)
                                 if on_progress:
                                     on_progress(item_data)
-                                logger.info(f"[{len(results)}/{target_limit}] Extracted: {item_data.get('business_name')}")
+                                logger.info(f"[{len(results)}/{target_limit}] Extracted: {item_data.get('business_name')} (Rating: {item_data.get('rating')}, Reviews: {item_data.get('reviews_count')})")
 
                         except Exception as e:
-                            logger.debug(f"Failed to process card item: {e}")
+                            logger.warning(f"Failed to process place link: {e}")
                             continue
 
                     if len(results) >= target_limit:
@@ -243,21 +239,30 @@ class MapsWorker:
         logger.info(f"Extraction completed. Total extracted: {len(results)} entities for keyword '{keyword}'.")
         return results
 
-    async def _extract_detail_pane(self, page: Page, keyword: str) -> Optional[Dict[str, Any]]:
+    async def _extract_detail_pane(
+        self,
+        page: Page,
+        keyword: str,
+        fallback_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Extracts business fields from the active detail panel.
         Resilient against dynamic CSS class changes using semantic ARIA attributes.
         """
         try:
-            # 1. Business Name (h1)
-            name = None
-            name_locators = ["h1.DUwDvf", "div[role='main'] h1", "h1"]
-            for sel in name_locators:
-                el = page.locator(sel).first
-                if await el.count() > 0 and await el.is_visible(timeout=1000):
-                    text = await el.text_content()
-                    if text and text.strip():
-                        name = text.strip()
+            # 1. Business Name (fallback_name from aria-label or h1 in detail pane)
+            name = fallback_name
+            if not name:
+                name_locators = ["h1.DUwDvf", "div[role='main'] h1", "h1"]
+                for sel in name_locators:
+                    els = await page.locator(sel).all()
+                    for el in els:
+                        if await el.is_visible(timeout=500):
+                            text = await el.text_content()
+                            if text and text.strip() and text.strip() not in ["Hasil", "Results"]:
+                                name = text.strip()
+                                break
+                    if name:
                         break
 
             if not name:
@@ -407,7 +412,7 @@ class MapsWorker:
             return entity.to_dict()
 
         except Exception as e:
-            logger.debug(f"Error extracting detail pane: {e}")
+            logger.warning(f"Error extracting detail pane: {e}")
             return None
 
     async def _extract_single_profile(self, page: Page, keyword: str) -> Optional[Dict[str, Any]]:
