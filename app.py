@@ -342,31 +342,28 @@ with tab_overview:
         st.altair_chart(chart_geo, use_container_width=True)
 
     with chart_col4:
-        st.caption("Matriks Prioritas: Saturasi Kompetitor vs Volume Review")
-        chart_matrix = (
+        st.caption("Tingkat Saturasi Software Kompetitor per Niche (%)")
+        chart_sat = (
             alt.Chart(summary_df)
-            .mark_circle(size=260)
+            .mark_bar(cornerRadiusEnd=4)
             .encode(
-                x=alt.X("saturation_pct:Q", title="Tingkat Saturasi Software (%)", scale=alt.Scale(domain=[10, 100])),
-                y=alt.Y("avg_reviews:Q", title="Rata-rata Review", scale=alt.Scale(domain=[0, 600])),
+                x=alt.X("saturation_pct:Q", title="Saturasi Software (%)", scale=alt.Scale(domain=[0, 100])),
+                y=alt.Y("niche_name:N", sort="x", title=""),
                 color=alt.Color(
-                    "opportunity_tier:N",
-                    title="Peluang",
-                    scale=alt.Scale(
-                        domain=["Tier 1 (Peluang Utama)", "Tier 1 (Peluang Tinggi)", "Tier 2", "Tier 3 (Jenuh POS)"],
-                        range=["#16a34a", "#2563eb", "#d97706", "#dc2626"],
-                    ),
+                    "saturation_pct:Q",
+                    title="Saturasi (%)",
+                    scale=alt.Scale(scheme="redyellowgreen", reverse=True),
+                    legend=None,
                 ),
                 tooltip=[
                     alt.Tooltip("niche_name:N", title="Niche"),
-                    alt.Tooltip("saturation_pct:Q", format=".0f%%", title="Saturasi"),
-                    alt.Tooltip("avg_reviews:Q", format=".1f", title="Rata-rata Review"),
-                    alt.Tooltip("total_sample_scraped:Q", title="Jumlah Entitas"),
+                    alt.Tooltip("saturation_pct:Q", title="Saturasi Software (%)"),
+                    alt.Tooltip("opportunity_tier:N", title="Status Peluang"),
                 ],
             )
             .properties(height=280)
         )
-        st.altair_chart(chart_matrix, use_container_width=True)
+        st.altair_chart(chart_sat, use_container_width=True)
 
 
 # ==============================================================================
