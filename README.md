@@ -191,6 +191,10 @@ Aplikasi dasbor interaktif berbasis **Streamlit** disediakan untuk menganalisis 
 
 ### Menjalankan Dashboard:
 ```bash
+# Rekomendasi di Windows (menggunakan modul python):
+python -m streamlit run app.py
+
+# Atau jika streamlit sudah terdaftar di PATH:
 streamlit run app.py
 ```
 
