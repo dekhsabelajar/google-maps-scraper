@@ -185,6 +185,47 @@ Hasil uji mencakup:
 
 ---
 
-## 8. Lisensi
+## 8. Dashboard Interaktif Streamlit
+
+Aplikasi dasbor interaktif berbasis **Streamlit** disediakan untuk menganalisis data kontak dan ulasan bisnis dari 7 niche Micro-SaaS secara visual, statistik, dan inspeksi manual per file.
+
+### Menjalankan Dashboard:
+```bash
+streamlit run app.py
+```
+
+### Fitur Utama Dashboard:
+1. **Ringkasan Eksekutif & Matriks Prioritas**:
+   - Kartu KPI tingkat tinggi (Total Niche, Total Entitas, Rata-rata Review Tertinggi, Ulasan Maksimal, Rekomendasi Utama Tier 1).
+   - Matriks perbandingan 7 niche lengkap dengan tingkat saturasi software dari dokumen riset.
+   - Grafik interaktif Altair: Rata-rata Ulasan per Niche, Ulasan Maksimum, Matriks Peluang (Saturasi vs Volume), dan Sebaran Sampel Geografis (DIY, Magelang, Klaten).
+2. **Analisis Komparatif 7 Niche**:
+   - Analisis mendalam profil petahana, kisaran harga, titik masalah operasional (*pain points*), dan spesifikasi solusi MVP Micro-SaaS per niche.
+3. **Eksplorasi Data Manual (7 File & Master Data)**:
+   - Pemilih file untuk memeriksa dataset master (127 entitas) atau masing-masing dari ke-7 file CSV niche secara mandiri.
+   - Filter teks pencarian multi-kolom (Nama Bisnis, Kategori, Alamat).
+   - Filter rentang rating, jumlah ulasan minimum, wilayah geografis, dan kelengkapan kontak (telepon, website, email).
+   - Tombol unduh langsung berkas CSV aktif.
+4. **Integrasi Presentasi Google Slides**:
+   - Tautan langsung dan ringkasan 10 slide presentasi eksekutif.
+
+---
+
+## 9. Dataset Riset Pasar B2B Micro-SaaS (7 Niche)
+
+Data scraping empiris di wilayah DI Yogyakarta, Magelang, dan Klaten tersimpan pada folder `exports/`:
+- `niche_1_kost_eksklusif.csv`: 19 entitas, avg review 60.9 (top: Kost M - 314 reviews)
+- `niche_2_gym_kebugaran.csv`: 18 entitas, avg review 164.8 (top: WGYM - 634 reviews)
+- `niche_3_rental_kendaraan_kamera.csv`: 18 entitas, avg review 239.7 (top: JOGJAKAMERA - 1,445 reviews)
+- `niche_4_barbershop_salon.csv`: 18 entitas, avg review 297.0 (top: BarberKing Klaten - 1,393 reviews)
+- `niche_5_percetakan_digital.csv`: 18 entitas, avg review 633.7 (top: Mangrove Printing - 2,792 reviews)
+- `niche_6_car_wash.csv`: 18 entitas, avg review 201.7 (top: DK Car Wash - 1,779 reviews)
+- `niche_7_pet_shop_vet.csv`: 18 entitas, avg review 422.7 (top: Klinik Hewan Jogja - 2,236 reviews)
+- `master_7_niches_summary.csv`: Ringkasan benchmark komparatif seluruh niche.
+- `all_7_niches_contacts.csv`: Seluruh 127 baris kontak entitas bisnis gabungan.
+
+---
+
+## 10. Lisensi
 
 Didistribusikan di bawah lisensi MIT.
