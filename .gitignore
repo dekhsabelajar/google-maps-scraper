@@ -43,9 +43,9 @@ htmlcov/
 .env
 .env.local
 
-# Scraped Output Exports (preserve directory structure via .gitkeep)
-exports/*
-!exports/.gitkeep
+# Scraped Output Exports (temporary leads and raw JSONs ignored, curated dashboard CSVs tracked)
+exports/leads_*
+exports/*.json
 
 # IDEs & Operating System
 .vscode/

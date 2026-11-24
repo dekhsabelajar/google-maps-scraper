@@ -1,0 +1,8 @@
+﻿niche_id,niche_name,total_sample_scraped,avg_rating,avg_reviews,max_reviews,top_active_business,diy_sample,magelang_sample,klaten_sample,csv_path
+1,Kost Eksklusif,86,4.69,67.7,1596,Pinnacle Co-Living Kost Exclusive Yogyakarta (1596 reviews),53,19,20,exports\niche_1_kost_eksklusif.csv
+2,Gym & Pusat Kebugaran,80,4.73,194.6,1720,One Time Pilates (1720 reviews),39,21,21,exports\niche_2_gym_kebugaran.csv
+3,Rental Kendaraan & Kamera,103,4.76,156.3,2468,Global Rental Motor (2468 reviews),65,19,20,exports\niche_3_rental_kendaraan_kamera.csv
+4,Barbershop & Salon,90,4.82,497.0,4395,Daisy Beauty Salon By Debby (4395 reviews),50,21,21,exports\niche_4_barbershop_salon.csv
+5,Percetakan Digital,89,4.45,351.8,2792,Mangrove Printing (2792 reviews),50,20,20,exports\niche_5_percetakan_digital.csv
+6,Car Wash,88,4.48,146.5,1779,DK (DeKa) Car Wash and Coffee Corner (1779 reviews),52,21,20,exports\niche_6_car_wash.csv
+7,"Pet Shop, Grooming, & Vet",69,4.74,252.3,2236,Klinik Hewan Jogja (2236 reviews),38,20,22,exports\niche_7_pet_shop_vet.csv
