@@ -237,12 +237,10 @@ with col4:
 st.write("")
 
 # --- TABS NAVIGATION ---
-tab_overview, tab_explorer, tab_reviews, tab_matrix, tab_slides = st.tabs([
+tab_overview, tab_explorer, tab_reviews = st.tabs([
     "Ringkasan & Visualisasi",
     "Eksplorasi Data Manual (7 File CSV)",
     "Data Ulasan Pelanggan (Reviews)",
-    "Peluang Solusi Micro-SaaS",
-    "Presentasi Google Slides",
 ])
 
 # ==============================================================================
@@ -561,111 +559,6 @@ with tab_reviews:
         st.info("Data ulasan belum tersedia. Jalankan skrip scrape_reviews.py untuk mengekstrak ulasan terbaru.")
 
 
-# ==============================================================================
-# TAB 4: CONCISE OPPORTUNITY & MVP RECOMMENDATIONS
-# ==============================================================================
-with tab_matrix:
-    st.caption("Pemetaan Ringkas Masalah Operasional & Rekomendasi Solusi Micro-SaaS per Niche")
-
-    solutions = [
-        {
-            "tier": "Tier 1",
-            "niche": "Rental Kendaraan & Kamera",
-            "stat": "103 Entitas • 20% Saturasi",
-            "problem": "Rawan penggelapan alat/unit, sengketa lecet fisik, dan pengecekan ketersediaan manual via WA.",
-            "mvp": "Web booking real-time + verifikasi e-KYC KTP anti-fraud + form foto kondisi serah terima unit."
-        },
-        {
-            "tier": "Tier 1",
-            "niche": "Car Wash & Detailing",
-            "stat": "88 Entitas • 26% Saturasi",
-            "problem": "Pelanggan menunggu tanpa kepastian durasi, nota kertas basah, dan komisi pencuci direkap manual.",
-            "mvp": "Kasir 3-klik berbasis plat nomor, papan antrean status cuci publik, dan auto-notifikasi WA selesai cuci."
-        },
-        {
-            "tier": "Tier 1",
-            "niche": "Percetakan Digital",
-            "stat": "89 Entitas • 34% Saturasi",
-            "problem": "Antrean kasir lambat karena hitung manual meteran bahan, serta admin lelah membalas 'kapan cetakan selesai'.",
-            "mvp": "Kalkulator instan harga cetak luas/bahan + link publik pelacak status pesanan SPK online."
-        },
-        {
-            "tier": "Tier 2",
-            "niche": "Pet Shop, Grooming, & Vet",
-            "stat": "69 Entitas • 52% Saturasi",
-            "problem": "SaaS klinik veteriner terlalu mahal bagi grooming ritel, dan pemilik cemas saat hewan dititipkan.",
-            "mvp": "SaaS pencatatan grooming/hotel ringan dengan kirim foto progres anabul ke WA + pengingat vaksin berkala."
-        },
-        {
-            "tier": "Tier 2",
-            "niche": "Gym & Studio Kebugaran",
-            "stat": "80 Entitas • 58% Saturasi",
-            "problem": "Turnstile gate mahal bagi gym mandiri, rawan titip kartu member, dan komisi Personal Trainer manual.",
-            "mvp": "Absensi member berbasis QR dinamis resepsionis (anti-screenshot) + pencatatan sesi PT otomatis."
-        },
-        {
-            "tier": "Tier 2",
-            "niche": "Kost Eksklusif",
-            "stat": "86 Entitas • 62% Saturasi",
-            "problem": "Pemilik menolak komisi agregator kamar, serta rekonsiliasi transfer bank manual sering menyita waktu.",
-            "mvp": "Sistem penagihan otomatis QRIS/VA via WhatsApp tanpa biaya potongan komisi per kamar."
-        },
-        {
-            "tier": "Tier 3",
-            "niche": "Barbershop & Salon",
-            "stat": "90 Entitas • 88% Saturasi",
-            "problem": "Sangat padat oleh POS kasir generik (Moka, Majoo, Fresha), namun minim retensi kunjungan ulang.",
-            "mvp": "Micro-tool antrean kapster via web browser + reminder otomatis potong rambut setiap 3 minggu."
-        },
-    ]
-
-    for item in solutions:
-        with st.expander(f"[{item['tier']}] {item['niche']} — {item['stat']}"):
-            col_p, col_s = st.columns(2)
-            with col_p:
-                st.markdown(f"**Titik Masalah:**\n{item['problem']}")
-            with col_s:
-                st.markdown(f"**Rekomendasi MVP:**\n{item['mvp']}")
-
-
-# ==============================================================================
-# TAB 4: GOOGLE SLIDES INTEGRATION
-# ==============================================================================
-with tab_slides:
-    slides_link = "https://docs.google.com/presentation/d/14t__HKhfUhLBtCdFePodnnAGZaeQpR588UcawF8JiNM/edit"
-    
-    st.markdown(
-        f"""
-        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
-            <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 6px;">
-                Laporan Presentasi Eksekutif Google Slides (10 Slide)
-            </div>
-            <div style="font-size: 13px; color: #475569; margin-bottom: 14px;">
-                Dokumen paparan lengkap mencakup ringkasan eksekutif, metodologi ekstraksi 605 entitas, lanskap kompetisi, dan peta jalan komersialisasi.
-            </div>
-            <a href="{slides_link}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 13px;">
-                Buka Presentasi Google Slides &rarr;
-            </a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.caption("Rangkuman Topik 10 Slide:")
-    topics = [
-        "Slide 1: Judul & Lingkup Wilayah DIY, Magelang, Klaten",
-        "Slide 2: Metodologi & Validasi 605 Entitas Google Maps",
-        "Slide 3: Komparasi Volume Ulasan & Aktivitas Pelanggan",
-        "Slide 4: Deep-Dive Tier 1: Rental Kendaraan & Kamera (Saturasi 20%)",
-        "Slide 5: Deep-Dive Tier 1: Car Wash & Detailing (Saturasi 26%)",
-        "Slide 6: Deep-Dive Tier 1: Percetakan Digital & SPK Tracking (Saturasi 34%)",
-        "Slide 7: Deep-Dive Tier 2: Pet Shop, Vet, & Gym Studio",
-        "Slide 8: Deep-Dive Tier 3: Barbershop & Kost Eksklusif (Pasar Padat POS)",
-        "Slide 9: Matriks Prioritas Eksekusi Go-To-Market",
-        "Slide 10: Rencana Aksi Outreach WhatsApp 30 Hari",
-    ]
-    for top in topics:
-        st.markdown(f"• {top}")
 
 # Footer
 st.markdown(
