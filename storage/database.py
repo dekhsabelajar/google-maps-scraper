@@ -3,6 +3,7 @@ Database storage module: SQLite/PostgreSQL schema, entity deduplication,
 transaction management, and atomic checkpointing.
 """
 import enum
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -83,6 +84,42 @@ class BusinessEntity(Base):
             "enrichment_status": self.enrichment_status.value if hasattr(self.enrichment_status, "value") else str(self.enrichment_status),
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
             "dedup_hash": self.dedup_hash,
+        }
+
+
+class BusinessReview(Base):
+    """
+    Stores individual customer reviews from Google Maps.
+    Includes reviewer name, star rating, text comment, sentiment tag, and owner responses.
+    """
+    __tablename__ = "business_reviews"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), nullable=True)
+    business_name = Column(String(255), nullable=False, index=True)
+    niche = Column(String(255), nullable=True, index=True)
+    author = Column(String(255), nullable=True)
+    rating = Column(Float, nullable=True)
+    review_date = Column(String(100), nullable=True)
+    review_text = Column(Text, nullable=True)
+    sentiment = Column(String(50), nullable=True)
+    owner_response = Column(Text, nullable=True)
+    scraped_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    review_hash = Column(String(64), unique=True, index=True, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "business_id": self.business_id,
+            "business_name": self.business_name,
+            "niche": self.niche,
+            "author": self.author,
+            "rating": self.rating,
+            "review_date": self.review_date,
+            "review_text": self.review_text,
+            "sentiment": self.sentiment,
+            "owner_response": self.owner_response,
+            "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
         }
 
 
@@ -249,5 +286,76 @@ class DatabaseManager:
             if keyword:
                 stmt = stmt.where(BusinessEntity.search_keyword == keyword)
             return len(session.execute(stmt).scalars().all())
+        finally:
+            session.close()
+
+    def insert_review(
+        self,
+        business_name: str,
+        author: str,
+        rating: Optional[float] = None,
+        review_date: Optional[str] = None,
+        review_text: Optional[str] = None,
+        sentiment: Optional[str] = None,
+        owner_response: Optional[str] = None,
+        niche: Optional[str] = None,
+        business_id: Optional[str] = None,
+    ) -> Tuple[BusinessReview, bool]:
+        raw_sig = f"{business_name}_{author}_{rating}_{review_date}_{review_text[:30] if review_text else ''}"
+        review_hash = hashlib.sha256(raw_sig.encode("utf-8")).hexdigest()
+        session = self.Session()
+        try:
+            stmt = select(BusinessReview).where(BusinessReview.review_hash == review_hash)
+            existing = session.execute(stmt).scalar_one_or_none()
+            if existing:
+                return existing, False
+
+            new_review = BusinessReview(
+                business_id=business_id,
+                business_name=business_name,
+                niche=niche,
+                author=author,
+                rating=rating,
+                review_date=review_date,
+                review_text=review_text,
+                sentiment=sentiment,
+                owner_response=owner_response,
+                review_hash=review_hash,
+            )
+            session.add(new_review)
+            session.commit()
+            return new_review, True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_all_reviews_as_dicts(
+        self,
+        business_name: Optional[str] = None,
+        niche: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        session = self.Session()
+        try:
+            stmt = select(BusinessReview)
+            if business_name:
+                stmt = stmt.where(BusinessReview.business_name == business_name)
+            if niche:
+                stmt = stmt.where(BusinessReview.niche == niche)
+            if limit:
+                stmt = stmt.limit(limit)
+            reviews = session.execute(stmt).scalars().all()
+            return [r.to_dict() for r in reviews]
+        finally:
+            session.close()
+
+    def get_reviewed_business_names(self) -> set:
+        session = self.Session()
+        try:
+            stmt = select(BusinessReview.business_name).distinct()
+            res = session.execute(stmt).scalars().all()
+            return set(res)
         finally:
             session.close()

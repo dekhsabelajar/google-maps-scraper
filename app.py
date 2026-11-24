@@ -472,7 +472,8 @@ with tab_reviews:
 
         c_r1, c_r2, c_r3, c_r4 = st.columns(4)
         with c_r1:
-            st.metric("Total Ulasan Terekstraksi", f"{tot_revs} Ulasan", "11 Entitas Bisnis Sampel")
+            biz_count = df_reviews['business_name'].nunique() if 'business_name' in df_reviews.columns else 0
+            st.metric("Total Ulasan Terekstraksi", f"{tot_revs} Ulasan", f"{biz_count} Entitas Bisnis")
         with c_r2:
             st.metric("Rata-rata Rating Ulasan", f"{avg_rat:.2f} ★")
         with c_r3:
