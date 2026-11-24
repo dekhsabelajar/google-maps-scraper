@@ -144,6 +144,17 @@ def load_niche_data(filename: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+@st.cache_data
+def load_reviews_data() -> pd.DataFrame:
+    path = EXPORTS_DIR / "scraped_business_reviews.csv"
+    if path.exists():
+        df = pd.read_csv(path)
+        if "rating" in df.columns:
+            df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+        return df
+    return pd.DataFrame()
+
+
 # Catalog of 7 niche CSV files
 FILE_OPTIONS = {
     "Master Dataset (Semua 605 Entitas)": "all_7_niches_contacts.csv",
@@ -226,9 +237,10 @@ with col4:
 st.write("")
 
 # --- TABS NAVIGATION ---
-tab_overview, tab_explorer, tab_matrix, tab_slides = st.tabs([
+tab_overview, tab_explorer, tab_reviews, tab_matrix, tab_slides = st.tabs([
     "Ringkasan & Visualisasi",
     "Eksplorasi Data Manual (7 File CSV)",
+    "Data Ulasan Pelanggan (Reviews)",
     "Peluang Solusi Micro-SaaS",
     "Presentasi Google Slides",
 ])
@@ -447,7 +459,109 @@ with tab_explorer:
 
 
 # ==============================================================================
-# TAB 3: CONCISE OPPORTUNITY & MVP RECOMMENDATIONS
+# TAB 3: CUSTOMER REVIEWS & SENTIMENT EXPLORER
+# ==============================================================================
+with tab_reviews:
+    df_reviews = load_reviews_data()
+
+    if not df_reviews.empty:
+        tot_revs = len(df_reviews)
+        avg_rat = df_reviews["rating"].mean() if "rating" in df_reviews.columns else 0.0
+        pos_pct = (df_reviews["sentiment"] == "Positif").mean() * 100 if "sentiment" in df_reviews.columns else 0.0
+        pain_count = (df_reviews["sentiment"] == "Masalah / Keluhan").sum() if "sentiment" in df_reviews.columns else 0
+
+        c_r1, c_r2, c_r3, c_r4 = st.columns(4)
+        with c_r1:
+            st.metric("Total Ulasan Terekstraksi", f"{tot_revs} Ulasan", "11 Entitas Bisnis Sampel")
+        with c_r2:
+            st.metric("Rata-rata Rating Ulasan", f"{avg_rat:.2f} ★")
+        with c_r3:
+            st.metric("Sentimen Positif", f"{pos_pct:.1f}%")
+        with c_r4:
+            st.metric("Ulasan Keluhan / Pain Point", f"{pain_count} Temuan", "Validasi Masalah Operasional")
+
+        st.write("")
+
+        col_rf1, col_rf2, col_rf3, col_rf4 = st.columns(4)
+        with col_rf1:
+            niche_opts = ["Semua Niche"] + sorted(list(df_reviews["niche"].unique()))
+            sel_niche = st.selectbox("Filter Niche:", options=niche_opts, key="rev_niche")
+        with col_rf2:
+            if sel_niche != "Semua Niche":
+                biz_opts = ["Semua Bisnis"] + sorted(list(df_reviews[df_reviews["niche"] == sel_niche]["business_name"].unique()))
+            else:
+                biz_opts = ["Semua Bisnis"] + sorted(list(df_reviews["business_name"].unique()))
+            sel_biz = st.selectbox("Pilih Bisnis:", options=biz_opts, key="rev_biz")
+        with col_rf3:
+            sent_opts = ["Semua Sentimen", "Positif", "Netral", "Masalah / Keluhan"]
+            sel_sent = st.selectbox("Sentimen:", options=sent_opts, key="rev_sent")
+        with col_rf4:
+            rev_search = st.text_input("Cari Kata di Ulasan:", placeholder="Contoh: antre, admin, harga...", key="rev_q")
+
+        filtered_revs = df_reviews.copy()
+        if sel_niche != "Semua Niche":
+            filtered_revs = filtered_revs[filtered_revs["niche"] == sel_niche]
+        if sel_biz != "Semua Bisnis":
+            filtered_revs = filtered_revs[filtered_revs["business_name"] == sel_biz]
+        if sel_sent != "Semua Sentimen":
+            filtered_revs = filtered_revs[filtered_revs["sentiment"] == sel_sent]
+        if rev_search:
+            s_term = rev_search.strip().lower()
+            filtered_revs = filtered_revs[
+                filtered_revs["review_text"].astype(str).str.lower().str.contains(s_term)
+                | filtered_revs["author"].astype(str).str.lower().str.contains(s_term)
+            ]
+
+        col_c_left, col_c_right = st.columns([3, 1])
+        with col_c_left:
+            st.caption(f"Menampilkan **{len(filtered_revs)}** ulasan terfilter")
+            rev_cols = ["business_name", "niche", "author", "rating", "review_date", "sentiment", "review_text", "owner_response"]
+            st.dataframe(
+                filtered_revs[[c for c in rev_cols if c in filtered_revs.columns]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "business_name": st.column_config.TextColumn("Nama Usaha", width="medium"),
+                    "niche": st.column_config.TextColumn("Niche", width="small"),
+                    "author": st.column_config.TextColumn("Pereview", width="small"),
+                    "rating": st.column_config.NumberColumn("Rating", format="%.1f ★", width="small"),
+                    "review_date": st.column_config.TextColumn("Waktu", width="small"),
+                    "sentiment": st.column_config.TextColumn("Sentimen", width="small"),
+                    "review_text": st.column_config.TextColumn("Isi Teks Ulasan Pelanggan", width="large"),
+                    "owner_response": st.column_config.TextColumn("Tanggapan Pemilik", width="medium"),
+                },
+            )
+
+        with col_c_right:
+            st.caption("Distribusi Rating")
+            rating_counts = filtered_revs["rating"].value_counts().reset_index()
+            rating_counts.columns = ["Rating", "Jumlah"]
+            chart_rat = (
+                alt.Chart(rating_counts)
+                .mark_bar(cornerRadiusEnd=4, color="#3b82f6")
+                .encode(
+                    x=alt.X("Jumlah:Q", title="Jumlah Ulasan"),
+                    y=alt.Y("Rating:O", sort="descending", title="Bintang"),
+                    tooltip=["Rating:O", "Jumlah:Q"],
+                )
+                .properties(height=240)
+            )
+            st.altair_chart(chart_rat, use_container_width=True)
+
+            rev_csv_data = df_reviews.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Unduh CSV Ulasan",
+                data=rev_csv_data,
+                file_name="scraped_business_reviews.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+    else:
+        st.info("Data ulasan belum tersedia. Jalankan skrip scrape_reviews.py untuk mengekstrak ulasan terbaru.")
+
+
+# ==============================================================================
+# TAB 4: CONCISE OPPORTUNITY & MVP RECOMMENDATIONS
 # ==============================================================================
 with tab_matrix:
     st.caption("Pemetaan Ringkas Masalah Operasional & Rekomendasi Solusi Micro-SaaS per Niche")

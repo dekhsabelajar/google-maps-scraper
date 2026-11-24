@@ -199,25 +199,30 @@ streamlit run app.py
 ```
 
 ### Fitur Utama Dashboard:
-1. **Ringkasan Eksekutif & Matriks Prioritas**:
-   - Kartu KPI tingkat tinggi (Total Niche, Total Entitas, Rata-rata Review Tertinggi, Ulasan Maksimal, Rekomendasi Utama Tier 1).
-   - Matriks perbandingan 7 niche lengkap dengan tingkat saturasi software dari dokumen riset.
-   - Grafik interaktif Altair: Rata-rata Ulasan per Niche, Ulasan Maksimum, Matriks Peluang (Saturasi vs Volume), dan Sebaran Sampel Geografis (DIY, Magelang, Klaten).
-2. **Analisis Komparatif 7 Niche**:
-   - Analisis mendalam profil petahana, kisaran harga, titik masalah operasional (*pain points*), dan spesifikasi solusi MVP Micro-SaaS per niche.
-3. **Eksplorasi Data Manual (7 File & Master Data)**:
-   - Pemilih file untuk memeriksa dataset master (127 entitas) atau masing-masing dari ke-7 file CSV niche secara mandiri.
+1. **Ringkasan Eksekutif & Visualisasi**:
+   - Kartu KPI ringkas (Total 605 Entitas, Rata-rata Review Tertinggi, Ulasan Maksimal, Rekomendasi Utama Tier 1).
+   - Tabel benchmark 7 niche lengkap dengan persentase saturasi software.
+   - Grafik interaktif Altair: Jumlah Entitas per Niche, Rata-rata Ulasan, Matriks Peluang Pasar, dan Sebaran Geografis (DIY, Magelang, Klaten).
+2. **Eksplorasi Data Manual (7 File & Master Data)**:
+   - Pemilih file untuk memeriksa dataset master 605 entitas atau masing-masing dari ke-7 file CSV niche secara mandiri.
    - Filter teks pencarian multi-kolom (Nama Bisnis, Kategori, Alamat).
-   - Filter rentang rating, jumlah ulasan minimum, wilayah geografis, dan kelengkapan kontak (telepon, website, email).
+   - Filter rentang rating, jumlah ulasan minimum, wilayah geografis, dan kelengkapan nomor telepon.
    - Tombol unduh langsung berkas CSV aktif.
-4. **Integrasi Presentasi Google Slides**:
-   - Tautan langsung dan ringkasan 10 slide presentasi eksekutif.
+3. **Data Ulasan Pelanggan (Voice of Customer & Reviews)**:
+   - Halaman khusus eksplorasi ulasan asli pelanggan hasil scraping Google Maps dari entitas bisnis aktif.
+   - Filter ulasan per niche, per nama bisnis, tingkat sentimen (Positif, Netral, Keluhan/Pain Point), dan pencarian kata kunci di teks ulasan.
+   - Metrik sentimen ulasan, grafik distribusi rating bintang, dan pemisahan otomatis antara teks keluhan pelanggan dan tanggapan pemilik usaha.
+   - Tombol unduh langsung dataset ulasan (`scraped_business_reviews.csv`).
+4. **Peluang Solusi Micro-SaaS**:
+   - Pemetaan ringkas masalah operasional utama dan rekomendasi spesifikasi MVP Micro-SaaS per niche.
+5. **Integrasi Presentasi Google Slides**:
+   - Tautan langsung dan ringkasan isi 10 slide presentasi eksekutif.
 
 ---
 
 ## 9. Dataset Riset Pasar B2B Micro-SaaS (7 Niche)
 
-Data scraping empiris mendalam (605 entitas bisnis unik) di wilayah DI Yogyakarta (Yogyakarta, Sleman, Bantul), Magelang, dan Klaten tersimpan pada folder `exports/`:
+Data scraping empiris mendalam (605 entitas bisnis unik & dataset ulasan pelanggan) di wilayah DI Yogyakarta (Yogyakarta, Sleman, Bantul), Magelang, dan Klaten tersimpan pada folder `exports/`:
 - `niche_1_kost_eksklusif.csv`: 86 entitas, avg review 67.7 (top: Pinnacle Co-Living - 1,596 reviews)
 - `niche_2_gym_kebugaran.csv`: 80 entitas, avg review 194.6 (top: One Time Pilates - 1,720 reviews)
 - `niche_3_rental_kendaraan_kamera.csv`: 103 entitas, avg review 156.3 (top: Global Rental Motor - 2,468 reviews)
@@ -227,6 +232,7 @@ Data scraping empiris mendalam (605 entitas bisnis unik) di wilayah DI Yogyakart
 - `niche_7_pet_shop_vet.csv`: 69 entitas, avg review 252.3 (top: Klinik Hewan Jogja - 2,236 reviews)
 - `master_7_niches_summary.csv`: Ringkasan benchmark komparatif seluruh 7 niche bisnis.
 - `all_7_niches_contacts.csv`: Seluruh 605 baris kontak entitas bisnis gabungan.
+- `scraped_business_reviews.csv`: Dataset ulasan pelanggan asli, rating, komentar, dan tanggapan pemilik usaha.
 
 ---
 
