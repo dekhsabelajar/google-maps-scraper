@@ -45,6 +45,7 @@ htmlcov/
 
 # Scraped Output Exports (temporary leads and raw JSONs ignored, curated dashboard CSVs tracked)
 exports/leads_*
+exports/live_*
 exports/*.json
 
 # IDEs & Operating System

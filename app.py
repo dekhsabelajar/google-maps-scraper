@@ -1,14 +1,44 @@
 """
 Executive Dashboard: B2B Micro-SaaS Market Intelligence
-Minimalist, high-clarity dashboard analyzing 605 verified business entities
-across DIY Yogyakarta, Magelang, and Klaten.
-Strictly professional design with concise text and zero unnecessary emojis.
+Minimalist, high-clarity dashboard with live fast Google Maps scraping
+(keyword search + multi-location tags) and pre-loaded 7-niche validation data.
 """
 
+import asyncio
+import queue
+import sys
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable, Coroutine, List, TypeVar
+
+import altair as alt
 import pandas as pd
 import streamlit as st
-import altair as alt
+
+from core.maps_worker import MapsWorker
+from storage.database import DatabaseManager
+
+T = TypeVar("T")
+
+
+def run_async(coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> T:
+    """Run an async coroutine on a dedicated ProactorEventLoop on Windows."""
+    def _runner() -> T:
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro_factory())
+            finally:
+                loop.close()
+        return asyncio.run(coro_factory())
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(_runner).result()
+
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -32,7 +62,7 @@ st.markdown(
     .top-bar {
         border-bottom: 1px solid #e2e8f0;
         padding-bottom: 16px;
-        margin-bottom: 24px;
+        margin-bottom: 20px;
     }
     .top-title {
         font-size: 22px;
@@ -99,6 +129,153 @@ st.markdown(
 BASE_DIR = Path(__file__).resolve().parent
 EXPORTS_DIR = BASE_DIR / "exports"
 
+DEFAULT_KEYWORDS = [
+    "Cafe",
+    "Coffee Shop",
+    "Kost",
+    "Kost Eksklusif",
+    "Gym & Fitness",
+    "Barbershop",
+    "Salon Kecantikan",
+    "Laundry",
+    "Restoran",
+    "Warung Makan",
+    "Bakery & Pastry",
+    "Catering",
+    "Hotel & Penginapan",
+    "Villa & Resort",
+    "Coworking Space",
+    "Klinik Gigi",
+    "Klinik Kecantikan",
+    "Apotek",
+    "Pet Shop & Grooming",
+    "Dokter Hewan",
+    "Bengkel Mobil",
+    "Bengkel Motor",
+    "Car Wash & Detailing",
+    "Toko Sparepart",
+    "Rental Mobil",
+    "Rental Motor",
+    "Rental Kamera",
+    "Percetakan Digital",
+    "Studio Foto",
+    "Wedding Organizer",
+    "Event Organizer",
+    "Bimbingan Belajar",
+    "Kursus Bahasa",
+    "Toko Bangunan",
+    "Jasa Desain Interior",
+    "Kontraktor",
+    "Toko Elektronik",
+    "Toko Komputer & Laptop",
+    "Service HP",
+    "Toko Furniture",
+    "Florist / Toko Bunga",
+    "Travel Agent",
+    "Ekspedisi & Logistik",
+]
+
+DEFAULT_LOCATIONS = [
+    # DIY & Jawa Tengah
+    "Yogyakarta",
+    "Sleman",
+    "Bantul",
+    "Kulon Progo",
+    "Gunungkidul",
+    "Wonosari",
+    "Klaten",
+    "Magelang",
+    "Solo",
+    "Surakarta",
+    "Sukoharjo",
+    "Karanganyar",
+    "Boyolali",
+    "Sragen",
+    "Wonogiri",
+    "Semarang",
+    "Salatiga",
+    "Ungaran",
+    "Purwokerto",
+    "Banyumas",
+    "Cilacap",
+    "Purbalingga",
+    "Kebumen",
+    "Purworejo",
+    "Wonosobo",
+    "Temanggung",
+    "Pekalongan",
+    "Tegal",
+    "Kudus",
+    "Jepara",
+    "Pati",
+    # Jabodetabek & Jawa Barat
+    "Jakarta",
+    "Jakarta Selatan",
+    "Jakarta Pusat",
+    "Jakarta Barat",
+    "Jakarta Timur",
+    "Jakarta Utara",
+    "Bogor",
+    "Depok",
+    "Tangerang",
+    "Tangerang Selatan",
+    "Bekasi",
+    "Bandung",
+    "Cimahi",
+    "Cirebon",
+    "Tasikmalaya",
+    "Garut",
+    "Sukabumi",
+    "Karawang",
+    "Purwakarta",
+    # Jawa Timur
+    "Surabaya",
+    "Malang",
+    "Batu",
+    "Sidoarjo",
+    "Gresik",
+    "Kediri",
+    "Jember",
+    "Banyuwangi",
+    "Madiun",
+    "Blitar",
+    "Mojokerto",
+    "Pasuruan",
+    # Bali & Nusa Tenggara
+    "Bali",
+    "Denpasar",
+    "Badung",
+    "Canggu",
+    "Ubud",
+    "Gianyar",
+    "Lombok",
+    "Mataram",
+    # Sumatra, Kalimantan, Sulawesi
+    "Medan",
+    "Palembang",
+    "Padang",
+    "Pekanbaru",
+    "Batam",
+    "Bandar Lampung",
+    "Balikpapan",
+    "Samarinda",
+    "Banjarmasin",
+    "Pontianak",
+    "Makassar",
+    "Manado",
+]
+
+FILE_OPTIONS = {
+    "Master Dataset (Semua 605 Entitas)": "all_7_niches_contacts.csv",
+    "Niche 1: Kost Eksklusif": "niche_1_kost_eksklusif.csv",
+    "Niche 2: Gym & Pusat Kebugaran": "niche_2_gym_kebugaran.csv",
+    "Niche 3: Rental Kendaraan & Kamera": "niche_3_rental_kendaraan_kamera.csv",
+    "Niche 4: Barbershop & Salon": "niche_4_barbershop_salon.csv",
+    "Niche 5: Percetakan Digital": "niche_5_percetakan_digital.csv",
+    "Niche 6: Car Wash & Detailing": "niche_6_car_wash.csv",
+    "Niche 7: Pet Shop, Grooming, & Vet": "niche_7_pet_shop_vet.csv",
+}
+
 
 @st.cache_data
 def load_summary_data() -> pd.DataFrame:
@@ -155,236 +332,488 @@ def load_reviews_data() -> pd.DataFrame:
     return pd.DataFrame()
 
 
-# Catalog of 7 niche CSV files
-FILE_OPTIONS = {
-    "Master Dataset (Semua 605 Entitas)": "all_7_niches_contacts.csv",
-    "Niche 1: Kost Eksklusif": "niche_1_kost_eksklusif.csv",
-    "Niche 2: Gym & Pusat Kebugaran": "niche_2_gym_kebugaran.csv",
-    "Niche 3: Rental Kendaraan & Kamera": "niche_3_rental_kendaraan_kamera.csv",
-    "Niche 4: Barbershop & Salon": "niche_4_barbershop_salon.csv",
-    "Niche 5: Percetakan Digital": "niche_5_percetakan_digital.csv",
-    "Niche 6: Car Wash & Detailing": "niche_6_car_wash.csv",
-    "Niche 7: Pet Shop, Grooming, & Vet": "niche_7_pet_shop_vet.csv",
-}
+def build_live_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Build summary metrics grouped by niche (if multi-keyword) or by region (if single keyword)."""
+    if df.empty:
+        return pd.DataFrame()
+
+    unique_niches = df["niche"].nunique() if "niche" in df.columns else 1
+    group_col = "niche" if unique_niches > 1 else "region"
+
+    rows = []
+    for idx, (group_name, grp) in enumerate(df.groupby(group_col, sort=False), start=1):
+        has_web = grp["website_url"].notna() & (grp["website_url"].astype(str).str.strip() != "")
+        has_phone = grp["phone_number"].notna() & (grp["phone_number"].astype(str).str.strip() != "")
+        web_pct = float(has_web.mean() * 100) if len(grp) else 0.0
+        no_web_pct = 100.0 - web_pct
+
+        if no_web_pct >= 65:
+            tier = "Tier 1 (Peluang Tinggi)"
+        elif no_web_pct >= 40:
+            tier = "Tier 2 (Potensial)"
+        else:
+            tier = "Tier 3 (Digital Matang)"
+
+        rows.append({
+            "niche_id": idx,
+            "niche_name": group_name,
+            "total_sample_scraped": int(len(grp)),
+            "avg_reviews": float(grp["reviews_count"].mean()) if len(grp) else 0.0,
+            "max_reviews": int(grp["reviews_count"].max()) if len(grp) else 0,
+            "avg_rating": float(grp["rating"].dropna().mean()) if grp["rating"].notna().any() else 0.0,
+            "with_website_count": int(has_web.sum()),
+            "without_website_count": int((~has_web).sum()),
+            "with_phone_pct": float(has_phone.mean() * 100) if len(grp) else 0.0,
+            "saturation_pct": round(web_pct, 1),
+            "no_website_pct": round(no_web_pct, 1),
+            "opportunity_tier": tier,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def normalize_scraped_df(items: List[dict]) -> pd.DataFrame:
+    if not items:
+        return pd.DataFrame()
+    df = pd.DataFrame(items)
+    if "rating" in df.columns:
+        df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+    if "reviews_count" in df.columns:
+        df["reviews_count"] = pd.to_numeric(df["reviews_count"], errors="coerce").fillna(0).astype(int)
+    else:
+        df["reviews_count"] = 0
+    if "region" not in df.columns:
+        df["region"] = "Lainnya"
+    if "niche" not in df.columns:
+        df["niche"] = df.get("search_keyword", "Lainnya")
+    return df
+
 
 # --- HEADER ---
 st.markdown(
     """
     <div class="top-bar">
         <div class="top-title">B2B Micro-SaaS Market Intelligence</div>
-        <div class="top-subtitle">Analisis Validasi Empiris 605 Entitas Google Maps (DIY Yogyakarta, Magelang, & Klaten)</div>
+        <div class="top-subtitle">Fast Google Maps Market Scraper & Analisis Validasi Bisnis Multi-Wilayah</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-summary_df = load_summary_data()
+# --- SEARCH BAR & MULTI-LOCATION TAGS ---
+with st.container(border=True):
+    s_col1, s_col2, s_col3, s_col4 = st.columns([2.5, 2.5, 1.2, 1.3], vertical_alignment="bottom")
 
-# --- 4 CLEAN KPI TILES ---
-total_entities = int(summary_df["total_sample_scraped"].sum()) if not summary_df.empty else 605
-top_rev_row = summary_df.loc[summary_df["max_reviews"].idxmax()] if not summary_df.empty else None
-top_avg_row = summary_df.loc[summary_df["avg_reviews"].idxmax()] if not summary_df.empty else None
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Total Entitas Tervalidasi</div>
-            <div class="kpi-number">{total_entities:,}</div>
-            <div class="kpi-desc">7 Vertikal • DIY, Magelang, Klaten</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with col2:
-    st.markdown(
-        """
-        <div class="kpi-card">
-            <div class="kpi-label">Peluang Terbesar (Tier 1)</div>
-            <div class="kpi-number">Rental Alat</div>
-            <div class="kpi-desc">103 Bisnis • Saturasi Software 20%</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with col3:
-    avg_name = top_avg_row["niche_name"] if top_avg_row is not None else "Barbershop & Salon"
-    avg_val = f"{top_avg_row['avg_reviews']:.1f}" if top_avg_row is not None else "497.0"
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Rata-rata Ulasan Tertinggi</div>
-            <div class="kpi-number">{avg_val}</div>
-            <div class="kpi-desc">{avg_name}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with col4:
-    max_rev_num = f"{int(top_rev_row['max_reviews']):,}" if top_rev_row is not None else "4,395"
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Ulasan Bisnis Terbanyak</div>
-            <div class="kpi-number">{max_rev_num}</div>
-            <div class="kpi-desc">Daisy Beauty Salon Jogja</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-st.write("")
-
-# --- TABS NAVIGATION ---
-tab_overview, tab_explorer, tab_reviews = st.tabs([
-    "Ringkasan & Visualisasi",
-    "Eksplorasi Data Manual (7 File CSV)",
-    "Data Ulasan Pelanggan (Reviews)",
-])
-
-# ==============================================================================
-# TAB 1: RINGKASAN & VISUALISASI
-# ==============================================================================
-with tab_overview:
-    # Summary Table
-    if not summary_df.empty:
-        tbl = summary_df[[
-            "niche_id", "niche_name", "total_sample_scraped",
-            "avg_reviews", "max_reviews", "avg_rating", "saturation_pct", "opportunity_tier"
-        ]].copy()
-        tbl.columns = [
-            "ID", "Niche Bisnis", "Jumlah Entitas",
-            "Rata-rata Review", "Review Maksimal", "Rating", "Saturasi Software", "Status Peluang"
-        ]
-        st.dataframe(
-            tbl,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "ID": st.column_config.NumberColumn(width="small"),
-                "Niche Bisnis": st.column_config.TextColumn(width="medium"),
-                "Jumlah Entitas": st.column_config.NumberColumn(format="%d"),
-                "Rata-rata Review": st.column_config.NumberColumn(format="%.1f"),
-                "Review Maksimal": st.column_config.NumberColumn(format="%d"),
-                "Rating": st.column_config.NumberColumn(format="%.2f ★"),
-                "Saturasi Software": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
-                "Status Peluang": st.column_config.TextColumn(width="medium"),
-            }
+    with s_col1:
+        selected_keywords = st.multiselect(
+            "Kata Kunci / Niche (Maks. 10)",
+            options=DEFAULT_KEYWORDS,
+            default=[],
+            max_selections=10,
+            placeholder="Pilih hingga 10 kata kunci/niche...",
+            key="search_kw_select",
         )
+
+    with s_col2:
+        selected_locations = st.multiselect(
+            "Tag Lokasi / Kota",
+            options=DEFAULT_LOCATIONS,
+            default=[],
+            placeholder="Pilih satu atau beberapa kota/daerah...",
+            key="location_tags_select",
+        )
+
+    with s_col3:
+        scrape_all = st.checkbox(
+            "Tanpa Batas (Semua)",
+            value=True,
+            help="Scrape semua hasil yang tersedia di Google Maps sampai akhir daftar.",
+            key="scrape_all_cb",
+        )
+        if scrape_all:
+            limit_per_loc = 0
+        else:
+            limit_per_loc = st.number_input(
+                "Target / Lokasi",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                key="limit_per_loc_input",
+            )
+
+    with s_col4:
+        run_scrape_btn = st.button(
+            "Mulai Scrape",
+            type="primary",
+            use_container_width=True,
+        )
+
+    opt_col1, opt_col2, opt_col3 = st.columns([2.0, 2.0, 1.5], vertical_alignment="bottom")
+    with opt_col1:
+        custom_kw_raw = st.text_input(
+            "Tambah Kata Kunci Kustom (pisahkan koma, maks. total 10)",
+            placeholder="Contoh: coffee shop, coworking space, bakery",
+            key="custom_kw_input",
+        )
+    with opt_col2:
+        custom_loc_raw = st.text_input(
+            "Tambah Tag Lokasi Kustom (opsional, pisahkan koma)",
+            placeholder="Contoh: Bantul, Wonosari, Salatiga",
+            key="custom_loc_input",
+        )
+    with opt_col3:
+        fetch_details = st.checkbox(
+            "Ambil No. HP & Website (Detail Paralel)",
+            value=True,
+            help="Mengunjungi halaman detail tiap bisnis secara paralel (5 tab) untuk mengambil No. HP & Website yang tidak tampil di list.",
+            key="fetch_details_cb",
+        )
+
+# Merge preset + custom keywords (max 10)
+all_keywords: List[str] = list(selected_keywords)
+if custom_kw_raw.strip():
+    for part in custom_kw_raw.split(","):
+        kw_item = part.strip()
+        if kw_item and kw_item not in all_keywords:
+            all_keywords.append(kw_item)
+
+if len(all_keywords) > 10:
+    st.warning("Maksimal 10 kata kunci per sesi. Hanya 10 kata kunci pertama yang akan diproses.")
+    all_keywords = all_keywords[:10]
+
+# Merge preset + custom location tags while preserving order
+all_location_tags: List[str] = list(selected_locations)
+if custom_loc_raw.strip():
+    for part in custom_loc_raw.split(","):
+        loc_clean = part.strip()
+        if loc_clean and loc_clean not in all_location_tags:
+            all_location_tags.append(loc_clean)
+
+# Handle Scrape Execution
+if run_scrape_btn:
+    if not all_keywords:
+        st.warning("Pilih atau masukkan minimal satu kata kunci pencarian (contoh: `Cafe`).")
+    elif not all_location_tags:
+        st.warning("Pilih atau tambahkan minimal satu tag lokasi (contoh: `Yogyakarta`, `Klaten`, `Magelang`).")
+    else:
+        t_start = time.perf_counter()
+        kw_preview = ", ".join(all_keywords[:3]) + (f" (+{len(all_keywords) - 3} lainnya)" if len(all_keywords) > 3 else "")
+        status_box = st.status(
+            f"Menjalankan Fast Scraper untuk **{len(all_keywords)} kata kunci** ({kw_preview}) di **{len(all_location_tags)} lokasi**...",
+            expanded=True,
+        )
+        progress_bar = st.progress(0.0)
+
+        db = DatabaseManager()
+        worker = MapsWorker(db_manager=db, headless=True)
+
+        progress_queue: queue.Queue = queue.Queue()
+        loc_logs: List[str] = []
+
+        def on_task_start(kw_name: str, loc_name: str, idx: int, total: int):
+            progress_queue.put(("start", kw_name, loc_name, idx, total))
+
+        def on_task_done(kw_name: str, loc_name: str, items: List[dict]):
+            progress_queue.put(("done", kw_name, loc_name, len(items)))
+
+        def _worker_task():
+            if sys.platform == "win32":
+                loop = asyncio.ProactorEventLoop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(
+                        worker.search_batch(
+                            keywords=all_keywords,
+                            locations=all_location_tags,
+                            limit_per_location=int(limit_per_loc),
+                            on_task_start=on_task_start,
+                            on_task_done=on_task_done,
+                            fetch_details=fetch_details,
+                        )
+                    )
+                finally:
+                    loop.close()
+            return asyncio.run(
+                worker.search_batch(
+                    keywords=all_keywords,
+                    locations=all_location_tags,
+                    limit_per_location=int(limit_per_loc),
+                    on_task_start=on_task_start,
+                    on_task_done=on_task_done,
+                    fetch_details=fetch_details,
+                )
+            )
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_worker_task)
+                while not future.done():
+                    while not progress_queue.empty():
+                        evt = progress_queue.get_nowait()
+                        if evt[0] == "start":
+                            _, kw_name, loc_name, idx, total = evt
+                            progress_bar.progress(
+                                (idx - 1) / max(total, 1),
+                                text=f"Scraping '{kw_name} {loc_name}' ({idx}/{total})...",
+                            )
+                        elif evt[0] == "done":
+                            _, kw_name, loc_name, count = evt
+                            loc_logs.append(f"- **{kw_name}** ({loc_name}): {count} entitas")
+                    time.sleep(0.2)
+
+                combined_items = future.result()
+                while not progress_queue.empty():
+                    evt = progress_queue.get_nowait()
+                    if evt[0] == "done":
+                        _, kw_name, loc_name, count = evt
+                        loc_logs.append(f"- **{kw_name}** ({loc_name}): {count} entitas")
+
+            elapsed = time.perf_counter() - t_start
+            progress_bar.progress(1.0, text="Selesai!")
+
+            live_df = normalize_scraped_df(combined_items)
+            if not live_df.empty:
+                EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_kw = "".join(c if c.isalnum() else "_" for c in all_keywords[0])
+                out_filename = f"live_{safe_kw}_{len(all_keywords)}kw_{ts}.csv"
+                live_df.to_csv(EXPORTS_DIR / out_filename, index=False, encoding="utf-8-sig")
+
+                st.session_state["live_df"] = live_df
+                st.session_state["live_meta"] = {
+                    "keywords": all_keywords,
+                    "keyword": kw_preview,
+                    "locations": all_location_tags,
+                    "elapsed": elapsed,
+                    "filename": out_filename,
+                }
+                st.session_state["view_mode"] = "Hasil Scrape Terbaru"
+                status_box.update(
+                    label=f"Selesai dalam {elapsed:.1f} detik — {len(live_df)} entitas unik terkumpul!",
+                    state="complete",
+                )
+                for line in loc_logs:
+                    status_box.write(line)
+            else:
+                status_box.update(label="Tidak ada entitas yang berhasil diambil.", state="error")
+        except Exception as err:
+            status_box.update(label=f"Terjadi kesalahan saat scraping: {type(err).__name__}: {err}", state="error")
+            status_box.code(traceback.format_exc())
+
+# ==============================================================================
+# RENDER REPORT ONLY WHEN LIVE DATA EXISTS
+# ==============================================================================
+has_live_data = "live_df" in st.session_state and not st.session_state["live_df"].empty
+
+if not has_live_data:
+    st.info("Masukkan kata kunci dan pilih tag lokasi di atas, lalu klik **Mulai Scrape** untuk melihat laporan analisis pasar.")
+else:
+    is_live_mode = True
+    live_df = st.session_state["live_df"]
+    live_meta = st.session_state["live_meta"]
+    summary_df = build_live_summary(live_df)
+
+    total_entities = int(len(live_df))
+    locs_label = ", ".join(live_meta["locations"])
+    kw_label = live_meta["keyword"]
+
+    # KPI 2: Digital Opportunity (No Website)
+    has_web_mask = live_df["website_url"].notna() & (live_df["website_url"].astype(str).str.strip() != "")
+    no_web_count = int((~has_web_mask).sum())
+    no_web_pct = (no_web_count / max(total_entities, 1)) * 100
+
+    # KPI 3: Highest Avg Reviews region/niche
+    top_avg_row = summary_df.loc[summary_df["avg_reviews"].idxmax()] if not summary_df.empty else None
+    avg_name = top_avg_row["niche_name"] if top_avg_row is not None else "-"
+    avg_val = f"{top_avg_row['avg_reviews']:.1f}" if top_avg_row is not None else "0.0"
+
+    # KPI 4: Most reviewed business
+    max_idx = live_df["reviews_count"].idxmax() if not live_df.empty else None
+    max_rev_num = f"{int(live_df.loc[max_idx, 'reviews_count']):,}" if max_idx is not None else "0"
+    max_rev_biz = str(live_df.loc[max_idx, "business_name"]) if max_idx is not None else "-"
+
+    kpi_cards = [
+        ("Total Entitas Tervalidasi", f"{total_entities:,}", f"{kw_label} • {locs_label} ({live_meta['elapsed']:.1f}s)"),
+        ("Peluang Digital (Tanpa Web)", f"{no_web_pct:.0f}%", f"{no_web_count:,} dari {total_entities:,} bisnis belum punya web"),
+        ("Rata-rata Ulasan Tertinggi", avg_val, avg_name),
+        ("Ulasan Bisnis Terbanyak", max_rev_num, max_rev_biz),
+    ]
+
+    # --- 4 CLEAN KPI TILES ---
+    col1, col2, col3, col4 = st.columns(4)
+    for col, (label, number, desc) in zip([col1, col2, col3, col4], kpi_cards):
+        with col:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">{label}</div>
+                    <div class="kpi-number">{number}</div>
+                    <div class="kpi-desc">{desc}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     st.write("")
 
-    # Visualizations: 2 Columns
-    chart_col1, chart_col2 = st.columns(2)
+    # --- TABS NAVIGATION ---
+    tab_overview, tab_explorer = st.tabs([
+        "Ringkasan & Visualisasi",
+        "Eksplorasi Data Gabungan",
+    ])
 
-    with chart_col1:
-        st.caption("Jumlah Entitas Bisnis Tervalidasi per Niche")
-        chart_count = (
-            alt.Chart(summary_df)
-            .mark_bar(cornerRadiusEnd=4, color="#2563eb")
-            .encode(
-                x=alt.X("total_sample_scraped:Q", title="Jumlah Entitas"),
-                y=alt.Y("niche_name:N", sort="-x", title=""),
-                tooltip=[
-                    alt.Tooltip("niche_name:N", title="Niche"),
-                    alt.Tooltip("total_sample_scraped:Q", title="Total Entitas"),
-                ],
+    # ==============================================================================
+    # TAB 1: RINGKASAN & VISUALISASI
+    # ==============================================================================
+    with tab_overview:
+        if not summary_df.empty:
+            is_multi_niche_live = st.session_state["live_df"]["niche"].nunique() > 1
+            col_dim_name = "Niche Bisnis" if is_multi_niche_live else "Wilayah / Lokasi"
+            tbl = summary_df[[
+                "niche_id", "niche_name", "total_sample_scraped",
+                "avg_reviews", "max_reviews", "avg_rating", "saturation_pct", "opportunity_tier"
+            ]].copy()
+            tbl.columns = [
+                "ID", col_dim_name, "Jumlah Entitas",
+                "Rata-rata Review", "Review Maksimal", "Rating", "Adopsi Website (%)", "Status Peluang"
+            ]
+            st.dataframe(
+                tbl,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "ID": st.column_config.NumberColumn(width="small"),
+                    col_dim_name: st.column_config.TextColumn(width="medium"),
+                    "Jumlah Entitas": st.column_config.NumberColumn(format="%d"),
+                    "Rata-rata Review": st.column_config.NumberColumn(format="%.1f"),
+                    "Review Maksimal": st.column_config.NumberColumn(format="%d"),
+                    "Rating": st.column_config.NumberColumn(format="%.2f ★"),
+                    "Adopsi Website (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
+                    "Status Peluang": st.column_config.TextColumn(width="medium"),
+                },
             )
-            .properties(height=280)
-        )
-        st.altair_chart(chart_count, use_container_width=True)
 
-    with chart_col2:
-        st.caption("Rata-rata Ulasan per Niche (Tingkat Aktivitas Pasar)")
-        chart_rev = (
-            alt.Chart(summary_df)
-            .mark_bar(cornerRadiusEnd=4, color="#0f766e")
-            .encode(
-                x=alt.X("avg_reviews:Q", title="Rata-rata Ulasan"),
-                y=alt.Y("niche_name:N", sort="-x", title=""),
-                tooltip=[
-                    alt.Tooltip("niche_name:N", title="Niche"),
-                    alt.Tooltip("avg_reviews:Q", format=".1f", title="Rata-rata Ulasan"),
-                    alt.Tooltip("max_reviews:Q", title="Ulasan Terbanyak"),
-                ],
+            st.write("")
+
+            chart_col1, chart_col2 = st.columns(2)
+            dim_label = "Niche" if is_multi_niche_live else "Wilayah"
+
+            with chart_col1:
+                st.caption(f"Jumlah Entitas Bisnis Tervalidasi per {dim_label}")
+                chart_count = (
+                    alt.Chart(summary_df)
+                    .mark_bar(cornerRadiusEnd=4, color="#2563eb")
+                    .encode(
+                        x=alt.X("total_sample_scraped:Q", title="Jumlah Entitas"),
+                        y=alt.Y("niche_name:N", sort="-x", title=""),
+                        tooltip=[
+                            alt.Tooltip("niche_name:N", title=dim_label),
+                            alt.Tooltip("total_sample_scraped:Q", title="Total Entitas"),
+                        ],
+                    )
+                    .properties(height=280)
+                )
+                st.altair_chart(chart_count, use_container_width=True)
+
+            with chart_col2:
+                st.caption(f"Rata-rata Ulasan per {dim_label} (Tingkat Aktivitas Pasar)")
+                chart_rev = (
+                    alt.Chart(summary_df)
+                    .mark_bar(cornerRadiusEnd=4, color="#0f766e")
+                    .encode(
+                        x=alt.X("avg_reviews:Q", title="Rata-rata Ulasan"),
+                        y=alt.Y("niche_name:N", sort="-x", title=""),
+                        tooltip=[
+                            alt.Tooltip("niche_name:N", title=dim_label),
+                            alt.Tooltip("avg_reviews:Q", format=".1f", title="Rata-rata Ulasan"),
+                            alt.Tooltip("max_reviews:Q", title="Ulasan Terbanyak"),
+                        ],
+                    )
+                    .properties(height=280)
+                )
+                st.altair_chart(chart_rev, use_container_width=True)
+
+            chart_col3, chart_col4 = st.columns(2)
+
+            with chart_col3:
+                if is_multi_niche_live:
+                    st.caption("Sebaran Wilayah per Niche")
+                    geo_counts = live_df.groupby(["niche", "region"]).size().reset_index(name="Jumlah")
+                    chart_geo = (
+                        alt.Chart(geo_counts)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("Jumlah:Q", title="Jumlah Bisnis"),
+                            y=alt.Y("niche:N", title=""),
+                            color=alt.Color("region:N", title="Wilayah"),
+                            tooltip=["niche:N", "region:N", "Jumlah:Q"],
+                        )
+                        .properties(height=280)
+                    )
+                    st.altair_chart(chart_geo, use_container_width=True)
+                else:
+                    st.caption("Kesiapan Digital per Wilayah: Punya Website vs Tanpa Website")
+                    web_df = summary_df.melt(
+                        id_vars=["niche_name"],
+                        value_vars=["with_website_count", "without_website_count"],
+                        var_name="Status Website",
+                        value_name="Jumlah",
+                    )
+                    web_df["Status Website"] = web_df["Status Website"].replace({
+                        "with_website_count": "Memiliki Website",
+                        "without_website_count": "Belum Ada Website",
+                    })
+                    chart_geo = (
+                        alt.Chart(web_df)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("Jumlah:Q", title="Jumlah Bisnis"),
+                            y=alt.Y("niche_name:N", title=""),
+                            color=alt.Color("Status Website:N", scale=alt.Scale(range=["#1e3a8a", "#94a3b8"])),
+                            tooltip=["niche_name:N", "Status Website:N", "Jumlah:Q"],
+                        )
+                        .properties(height=280)
+                    )
+                    st.altair_chart(chart_geo, use_container_width=True)
+
+            with chart_col4:
+                st.caption(f"Tingkat Adopsi Website per {dim_label} (%)")
+                chart_sat = (
+                    alt.Chart(summary_df)
+                    .mark_bar(cornerRadiusEnd=4)
+                    .encode(
+                        x=alt.X("saturation_pct:Q", title="Persentase (%)", scale=alt.Scale(domain=[0, 100])),
+                        y=alt.Y("niche_name:N", sort="x", title=""),
+                        color=alt.Color(
+                            "saturation_pct:Q",
+                            title="Persentase (%)",
+                            scale=alt.Scale(scheme="redyellowgreen", reverse=True),
+                            legend=None,
+                        ),
+                        tooltip=[
+                            alt.Tooltip("niche_name:N", title=dim_label),
+                            alt.Tooltip("saturation_pct:Q", title="Persentase (%)"),
+                            alt.Tooltip("opportunity_tier:N", title="Status Peluang"),
+                        ],
+                    )
+                    .properties(height=280)
+                )
+                st.altair_chart(chart_sat, use_container_width=True)
+
+    # ==============================================================================
+    # TAB 2: DATA EXPLORER
+    # ==============================================================================
+    with tab_explorer:
+        df_active = live_df
+        file_to_load = live_meta["filename"]
+        col_sel, col_btn = st.columns([3, 1])
+        with col_sel:
+            st.caption(
+                f"Dataset gabungan hasil scrape: **{live_meta['keyword']}** "
+                f"({', '.join(live_meta['locations'])})"
             )
-            .properties(height=280)
-        )
-        st.altair_chart(chart_rev, use_container_width=True)
-
-    chart_col3, chart_col4 = st.columns(2)
-
-    with chart_col3:
-        st.caption("Sebaran Wilayah: DIY vs Magelang vs Klaten")
-        geo_df = summary_df.melt(
-            id_vars=["niche_name"],
-            value_vars=["diy_sample", "magelang_sample", "klaten_sample"],
-            var_name="Wilayah",
-            value_name="Jumlah",
-        )
-        geo_df["Wilayah"] = geo_df["Wilayah"].replace({
-            "diy_sample": "DIY Yogyakarta",
-            "magelang_sample": "Magelang",
-            "klaten_sample": "Klaten"
-        })
-        chart_geo = (
-            alt.Chart(geo_df)
-            .mark_bar()
-            .encode(
-                x=alt.X("Jumlah:Q", title="Jumlah Bisnis"),
-                y=alt.Y("niche_name:N", title=""),
-                color=alt.Color("Wilayah:N", scale=alt.Scale(range=["#1e3a8a", "#0284c7", "#94a3b8"])),
-                tooltip=["niche_name:N", "Wilayah:N", "Jumlah:Q"],
-            )
-            .properties(height=280)
-        )
-        st.altair_chart(chart_geo, use_container_width=True)
-
-    with chart_col4:
-        st.caption("Tingkat Saturasi Software Kompetitor per Niche (%)")
-        chart_sat = (
-            alt.Chart(summary_df)
-            .mark_bar(cornerRadiusEnd=4)
-            .encode(
-                x=alt.X("saturation_pct:Q", title="Saturasi Software (%)", scale=alt.Scale(domain=[0, 100])),
-                y=alt.Y("niche_name:N", sort="x", title=""),
-                color=alt.Color(
-                    "saturation_pct:Q",
-                    title="Saturasi (%)",
-                    scale=alt.Scale(scheme="redyellowgreen", reverse=True),
-                    legend=None,
-                ),
-                tooltip=[
-                    alt.Tooltip("niche_name:N", title="Niche"),
-                    alt.Tooltip("saturation_pct:Q", title="Saturasi Software (%)"),
-                    alt.Tooltip("opportunity_tier:N", title="Status Peluang"),
-                ],
-            )
-            .properties(height=280)
-        )
-        st.altair_chart(chart_sat, use_container_width=True)
-
-
-# ==============================================================================
-# TAB 2: MANUAL DATA EXPLORER (ALL 7 FILES)
-# ==============================================================================
-with tab_explorer:
-    col_sel, col_btn = st.columns([3, 1])
-
-    with col_sel:
-        selected_label = st.selectbox(
-            "Pilih File Dataset Hasil Scraping:",
-            options=list(FILE_OPTIONS.keys()),
-            index=0,
-            label_visibility="collapsed",
-        )
-
-    file_to_load = FILE_OPTIONS[selected_label]
-    df_active = load_niche_data(file_to_load)
-
-    with col_btn:
-        if not df_active.empty:
+        with col_btn:
             csv_data = df_active.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label=f"Unduh {file_to_load}",
@@ -394,21 +823,28 @@ with tab_explorer:
                 use_container_width=True,
             )
 
-    if not df_active.empty:
-        # Compact filter bar
-        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        if "niche" in df_active.columns and df_active["niche"].nunique() > 1:
+            col_s0, col_s1, col_s2, col_s3, col_s4 = st.columns([1.2, 1.3, 1.1, 0.9, 1.0])
+            with col_s0:
+                niche_opts = ["Semua Niche"] + sorted(list(df_active["niche"].dropna().unique()))
+                selected_live_niche = st.selectbox("Niche:", options=niche_opts, label_visibility="collapsed")
+        else:
+            selected_live_niche = "Semua Niche"
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+
         with col_s1:
             q = st.text_input("Cari Bisnis / Alamat:", placeholder="Ketik kata kunci...", label_visibility="collapsed")
         with col_s2:
-            reg_opts = ["Semua Wilayah"] + sorted(list(df_active["region"].unique()))
+            reg_opts = ["Semua Wilayah"] + sorted(list(df_active["region"].dropna().unique()))
             selected_reg = st.selectbox("Wilayah:", options=reg_opts, label_visibility="collapsed")
         with col_s3:
             min_rev = st.number_input("Min. Review:", min_value=0, value=0, step=25, label_visibility="collapsed")
         with col_s4:
             has_phone_only = st.checkbox("Hanya yang ada No. HP", value=False)
 
-        # Filter execution
         filtered = df_active.copy()
+        if selected_live_niche != "Semua Niche" and "niche" in filtered.columns:
+            filtered = filtered[filtered["niche"] == selected_live_niche]
         if q:
             term = q.strip().lower()
             filtered = filtered[
@@ -423,15 +859,16 @@ with tab_explorer:
         if has_phone_only and "phone_number" in filtered.columns:
             filtered = filtered[filtered["phone_number"].notna() & (filtered["phone_number"] != "")]
 
-        # Quick stats line
         pct_phone = (filtered["phone_number"].notna() & (filtered["phone_number"] != "")).mean() * 100 if len(filtered) > 0 else 0
         pct_web = (filtered["website_url"].notna() & (filtered["website_url"] != "")).mean() * 100 if len(filtered) > 0 else 0
-        
-        st.caption(f"Menampilkan **{len(filtered)}** dari total **{len(df_active)}** entitas | Kelengkapan Telepon: **{pct_phone:.1f}%** | Kelengkapan Website: **{pct_web:.1f}%**")
 
-        # Table display
+        st.caption(
+            f"Menampilkan **{len(filtered)}** dari total **{len(df_active)}** entitas | "
+            f"Kelengkapan Telepon: **{pct_phone:.1f}%** | Kelengkapan Website: **{pct_web:.1f}%**"
+        )
+
         show_cols = [
-            c for c in ["business_name", "category", "rating", "reviews_count", "phone_number", "website_url", "region", "address"]
+            c for c in ["niche", "business_name", "category", "rating", "reviews_count", "phone_number", "website_url", "region", "address"]
             if c in filtered.columns
         ]
         st.dataframe(
@@ -439,6 +876,7 @@ with tab_explorer:
             use_container_width=True,
             hide_index=True,
             column_config={
+                "niche": st.column_config.TextColumn("Niche / Kata Kunci", width="small"),
                 "business_name": st.column_config.TextColumn("Nama Usaha", width="medium"),
                 "category": st.column_config.TextColumn("Kategori", width="small"),
                 "rating": st.column_config.NumberColumn("Rating", format="%.1f ★", width="small"),
@@ -449,119 +887,12 @@ with tab_explorer:
                 "address": st.column_config.TextColumn("Alamat Lengkap", width="large"),
             },
         )
-    else:
-        st.info(f"File {file_to_load} belum tersedia di folder exports.")
-
-
-# ==============================================================================
-# TAB 3: CUSTOMER REVIEWS & SENTIMENT EXPLORER
-# ==============================================================================
-with tab_reviews:
-    df_reviews = load_reviews_data()
-
-    if not df_reviews.empty:
-        tot_revs = len(df_reviews)
-        avg_rat = df_reviews["rating"].mean() if "rating" in df_reviews.columns else 0.0
-        pos_pct = (df_reviews["sentiment"] == "Positif").mean() * 100 if "sentiment" in df_reviews.columns else 0.0
-        pain_count = (df_reviews["sentiment"] == "Masalah / Keluhan").sum() if "sentiment" in df_reviews.columns else 0
-
-        c_r1, c_r2, c_r3, c_r4 = st.columns(4)
-        with c_r1:
-            biz_count = df_reviews['business_name'].nunique() if 'business_name' in df_reviews.columns else 0
-            st.metric("Total Ulasan Terekstraksi", f"{tot_revs} Ulasan", f"{biz_count} Entitas Bisnis")
-        with c_r2:
-            st.metric("Rata-rata Rating Ulasan", f"{avg_rat:.2f} ★")
-        with c_r3:
-            st.metric("Sentimen Positif", f"{pos_pct:.1f}%")
-        with c_r4:
-            st.metric("Ulasan Keluhan / Pain Point", f"{pain_count} Temuan", "Validasi Masalah Operasional")
-
-        st.write("")
-
-        col_rf1, col_rf2, col_rf3, col_rf4 = st.columns(4)
-        with col_rf1:
-            niche_opts = ["Semua Niche"] + sorted(list(df_reviews["niche"].unique()))
-            sel_niche = st.selectbox("Filter Niche:", options=niche_opts, key="rev_niche")
-        with col_rf2:
-            if sel_niche != "Semua Niche":
-                biz_opts = ["Semua Bisnis"] + sorted(list(df_reviews[df_reviews["niche"] == sel_niche]["business_name"].unique()))
-            else:
-                biz_opts = ["Semua Bisnis"] + sorted(list(df_reviews["business_name"].unique()))
-            sel_biz = st.selectbox("Pilih Bisnis:", options=biz_opts, key="rev_biz")
-        with col_rf3:
-            sent_opts = ["Semua Sentimen", "Positif", "Netral", "Masalah / Keluhan"]
-            sel_sent = st.selectbox("Sentimen:", options=sent_opts, key="rev_sent")
-        with col_rf4:
-            rev_search = st.text_input("Cari Kata di Ulasan:", placeholder="Contoh: antre, admin, harga...", key="rev_q")
-
-        filtered_revs = df_reviews.copy()
-        if sel_niche != "Semua Niche":
-            filtered_revs = filtered_revs[filtered_revs["niche"] == sel_niche]
-        if sel_biz != "Semua Bisnis":
-            filtered_revs = filtered_revs[filtered_revs["business_name"] == sel_biz]
-        if sel_sent != "Semua Sentimen":
-            filtered_revs = filtered_revs[filtered_revs["sentiment"] == sel_sent]
-        if rev_search:
-            s_term = rev_search.strip().lower()
-            filtered_revs = filtered_revs[
-                filtered_revs["review_text"].astype(str).str.lower().str.contains(s_term)
-                | filtered_revs["author"].astype(str).str.lower().str.contains(s_term)
-            ]
-
-        col_c_left, col_c_right = st.columns([3, 1])
-        with col_c_left:
-            st.caption(f"Menampilkan **{len(filtered_revs)}** ulasan terfilter")
-            rev_cols = ["business_name", "niche", "author", "rating", "review_date", "sentiment", "review_text", "owner_response"]
-            st.dataframe(
-                filtered_revs[[c for c in rev_cols if c in filtered_revs.columns]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "business_name": st.column_config.TextColumn("Nama Usaha", width="medium"),
-                    "niche": st.column_config.TextColumn("Niche", width="small"),
-                    "author": st.column_config.TextColumn("Pereview", width="small"),
-                    "rating": st.column_config.NumberColumn("Rating", format="%.1f ★", width="small"),
-                    "review_date": st.column_config.TextColumn("Waktu", width="small"),
-                    "sentiment": st.column_config.TextColumn("Sentimen", width="small"),
-                    "review_text": st.column_config.TextColumn("Isi Teks Ulasan Pelanggan", width="large"),
-                    "owner_response": st.column_config.TextColumn("Tanggapan Pemilik", width="medium"),
-                },
-            )
-
-        with col_c_right:
-            st.caption("Distribusi Rating")
-            rating_counts = filtered_revs["rating"].value_counts().reset_index()
-            rating_counts.columns = ["Rating", "Jumlah"]
-            chart_rat = (
-                alt.Chart(rating_counts)
-                .mark_bar(cornerRadiusEnd=4, color="#3b82f6")
-                .encode(
-                    x=alt.X("Jumlah:Q", title="Jumlah Ulasan"),
-                    y=alt.Y("Rating:O", sort="descending", title="Bintang"),
-                    tooltip=["Rating:O", "Jumlah:Q"],
-                )
-                .properties(height=240)
-            )
-            st.altair_chart(chart_rat, use_container_width=True)
-
-            rev_csv_data = df_reviews.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Unduh CSV Ulasan",
-                data=rev_csv_data,
-                file_name="scraped_business_reviews.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-    else:
-        st.info("Data ulasan belum tersedia. Jalankan skrip scrape_reviews.py untuk mengekstrak ulasan terbaru.")
-
-
 
 # Footer
 st.markdown(
     """
     <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #f1f5f9; text-align: center; color: #94a3b8; font-size: 11px;">
-        Google Maps Scraper & Micro-SaaS Market Intelligence • DIY, Magelang, Klaten
+        Google Maps Scraper & Micro-SaaS Market Intelligence
     </div>
     """,
     unsafe_allow_html=True,
