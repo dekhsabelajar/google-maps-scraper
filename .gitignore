@@ -42,6 +42,7 @@ htmlcov/
 *.sqlite3
 .env
 .env.local
+.streamlit/secrets.toml
 
 # Scraped Output Exports (temporary leads and raw JSONs ignored, curated dashboard CSVs tracked)
 exports/leads_*

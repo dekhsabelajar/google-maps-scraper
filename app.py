@@ -5,6 +5,8 @@ Minimalist, high-clarity dashboard with live fast Google Maps scraping
 """
 
 import asyncio
+import hmac
+import os
 import queue
 import sys
 import time
@@ -21,6 +23,12 @@ import streamlit as st
 
 from core.geo_intelligence import build_whitespace_summary, enrich_geo_and_scale_df
 from core.maps_worker import MapsWorker
+from core.outreach import (
+    DEFAULT_WA_TEMPLATE_1,
+    DEFAULT_WA_TEMPLATE_2,
+    DEFAULT_WA_TEMPLATE_3,
+    build_whatsapp_link,
+)
 from storage.database import DatabaseManager
 
 
@@ -406,19 +414,120 @@ def normalize_scraped_df(items: List[dict]) -> pd.DataFrame:
         df["region"] = "Lainnya"
     if "niche" not in df.columns:
         df["niche"] = df.get("search_keyword", "Lainnya")
+    if "is_replied" not in df.columns:
+        df["is_replied"] = False
+    else:
+        df["is_replied"] = df["is_replied"].fillna(False).astype(bool)
+    if "reply_notes" not in df.columns:
+        df["reply_notes"] = ""
+    else:
+        df["reply_notes"] = df["reply_notes"].fillna("").astype(str)
+    if "google_url" not in df.columns:
+        df["google_url"] = ""
     return enrich_geo_and_scale_df(df)
 
 
+def _resolve_app_password() -> tuple[str, bool]:
+    """Return (expected_password, is_default_fallback)."""
+    pw = os.getenv("APP_PASSWORD")
+    if not pw:
+        try:
+            pw = st.secrets.get("APP_PASSWORD")
+        except Exception:
+            pw = None
+    if pw and isinstance(pw, str) and pw.strip():
+        return pw.strip(), False
+    return "dekhsa2026", True
+
+
+def require_internal_auth() -> None:
+    """Simple internal password gate so the deployed app is not publicly accessible."""
+    if st.session_state.get("authenticated", False):
+        return
+
+    expected_pw, is_fallback = _resolve_app_password()
+    _, center_col, _ = st.columns([1.1, 1.4, 1.1])
+    with center_col:
+        st.markdown(
+            """
+            <div class="top-bar" style="text-align: center; margin-top: 40px;">
+                <div class="top-title">B2B Micro-SaaS Market Intelligence</div>
+                <div class="top-subtitle">Akses Internal Terbatas — Silakan Masukkan Password</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.form("internal_login_form", clear_on_submit=False):
+            pwd_input = st.text_input("Password Akses", type="password", placeholder="Masukkan password internal...")
+            submitted = st.form_submit_button("Masuk ke Dashboard", type="primary", use_container_width=True)
+            if submitted:
+                if hmac.compare_digest(pwd_input or "", expected_pw):
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("Password salah. Silakan coba lagi.")
+        if is_fallback:
+            st.caption("Catatan admin: `APP_PASSWORD` belum diset di Streamlit Secrets (menggunakan password bawaan).")
+    st.stop()
+
+
+def load_saved_entities_from_db(db: DatabaseManager) -> None:
+    """Load persisted entities from Supabase/SQLite into session_state so users never lose data."""
+    records = db.get_all_entities_as_dicts()
+    if not records:
+        return
+    saved_df = normalize_scraped_df(records)
+    if saved_df.empty:
+        return
+    # Infer readable region from kota_kabupaten / address if region is generic
+    if "kota_kabupaten" in saved_df.columns:
+        saved_df["region"] = saved_df.apply(
+            lambda r: r["kota_kabupaten"] if str(r.get("kota_kabupaten") or "") not in ("", "Tidak Diketahui") else r.get("region", "Lainnya"),
+            axis=1,
+        )
+    kws = sorted(list(saved_df["search_keyword"].dropna().unique())) if "search_keyword" in saved_df.columns else []
+    regs = sorted(list(saved_df["region"].dropna().unique())) if "region" in saved_df.columns else []
+    st.session_state["live_df"] = saved_df
+    st.session_state["live_meta"] = {
+        "keywords": kws,
+        "keyword": f"{len(kws)} Kata Kunci Tersimpan" if len(kws) > 1 else (kws[0] if kws else "Database"),
+        "locations": regs[:5] + ([f"+{len(regs)-5} lainnya"] if len(regs) > 5 else []),
+        "elapsed": 0.0,
+        "filename": "supabase_saved_entities.csv",
+    }
+
+
+# --- AUTH GATE ---
+require_internal_auth()
+
+db_instance = DatabaseManager()
+db_backend_label = db_instance.get_storage_backend_label()
+
+if "live_df" not in st.session_state:
+    load_saved_entities_from_db(db_instance)
+
 # --- HEADER ---
-st.markdown(
-    """
-    <div class="top-bar">
-        <div class="top-title">B2B Micro-SaaS Market Intelligence</div>
-        <div class="top-subtitle">Fast Google Maps Market Scraper & Analisis Validasi Bisnis Multi-Wilayah</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+hdr_left, hdr_right = st.columns([3.5, 1.3], vertical_alignment="center")
+with hdr_left:
+    st.markdown(
+        f"""
+        <div class="top-bar" style="margin-bottom: 8px;">
+            <div class="top-title">B2B Micro-SaaS Market Intelligence</div>
+            <div class="top-subtitle">Fast Google Maps Market Scraper, Geo-Intelligence &amp; Outreach CRM • Database: <b>{db_backend_label}</b></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with hdr_right:
+    btn_c1, btn_c2 = st.columns(2)
+    with btn_c1:
+        if st.button("Muat DB", use_container_width=True, help="Muat ulang seluruh data tersimpan dari database"):
+            load_saved_entities_from_db(db_instance)
+            st.rerun()
+    with btn_c2:
+        if st.button("Keluar", use_container_width=True):
+            st.session_state["authenticated"] = False
+            st.rerun()
 
 # --- SEARCH BAR & MULTI-LOCATION TAGS ---
 with st.container(border=True):
@@ -525,7 +634,7 @@ if run_scrape_btn:
         )
         progress_bar = st.progress(0.0)
 
-        db = DatabaseManager()
+        db = db_instance
         worker = MapsWorker(db_manager=db, headless=True)
 
         progress_queue: queue.Queue = queue.Queue()
@@ -600,14 +709,10 @@ if run_scrape_btn:
                 out_filename = f"live_{safe_kw}_{len(all_keywords)}kw_{ts}.csv"
                 live_df.to_csv(EXPORTS_DIR / out_filename, index=False, encoding="utf-8-sig")
 
-                st.session_state["live_df"] = live_df
-                st.session_state["live_meta"] = {
-                    "keywords": all_keywords,
-                    "keyword": kw_preview,
-                    "locations": all_location_tags,
-                    "elapsed": elapsed,
-                    "filename": out_filename,
-                }
+                # Refresh from DB so saved outreach statuses & IDs remain synced across sessions
+                load_saved_entities_from_db(db)
+                st.session_state["live_meta"]["elapsed"] = elapsed
+                st.session_state["live_meta"]["filename"] = out_filename
                 st.session_state["view_mode"] = "Hasil Scrape Terbaru"
                 status_box.update(
                     label=f"Selesai dalam {elapsed:.1f} detik — {len(live_df)} entitas unik terkumpul!",
@@ -678,10 +783,11 @@ else:
     st.write("")
 
     # --- TABS NAVIGATION ---
-    tab_overview, tab_geo, tab_explorer = st.tabs([
+    tab_overview, tab_geo, tab_explorer, tab_outreach = st.tabs([
         "Ringkasan & Visualisasi",
         "Analisis Spasial & Peta Pasar",
         "Eksplorasi Data Gabungan",
+        "Outreach & Hubungi Kontak",
     ])
 
     # ==============================================================================
@@ -1161,6 +1267,173 @@ else:
                         "phone_number": st.column_config.TextColumn("Telepon (+62)"),
                     },
                 )
+
+    # ==============================================================================
+    # TAB 4: OUTREACH & HUBUNGI KONTAK (WHATSAPP + STATUS BALASAN TERSIMPAN DI DB)
+    # ==============================================================================
+    with tab_outreach:
+        st.markdown("#### Manajemen Outreach & Hubungi Kontak WhatsApp")
+        st.caption(
+            "Klik tautan **Kenalan Awal**, **Reminder 1**, atau **Reminder 2** untuk membuka WhatsApp dengan pesan otomatis. "
+            "Centang kolom **Sudah Membalas** dan isi catatan balasan, lalu klik **Simpan Perubahan ke Database**."
+        )
+
+        # Outreach KPIs
+        out_df = live_df.copy()
+        has_phone_mask = out_df["phone_number"].notna() & (out_df["phone_number"].astype(str).str.strip() != "")
+        contactable_df = out_df[has_phone_mask].copy()
+        total_contacts = int(len(contactable_df))
+        replied_count = int(contactable_df["is_replied"].fillna(False).astype(bool).sum()) if total_contacts > 0 else 0
+        pending_count = max(0, total_contacts - replied_count)
+        reply_rate = (replied_count / total_contacts * 100.0) if total_contacts > 0 else 0.0
+
+        o_kpis = [
+            ("Kontak Siap Hubungi", f"{total_contacts:,}", f"Dari total {len(out_df):,} entitas"),
+            ("Sudah Membalas", f"{replied_count:,}", "Tercatat di database"),
+            ("Belum Membalas", f"{pending_count:,}", "Siap follow-up / reminder"),
+            ("Response Rate", f"{reply_rate:.1f}%", "Rasio balasan prospek"),
+        ]
+        oc1, oc2, oc3, oc4 = st.columns(4)
+        for col, (label, number, desc) in zip([oc1, oc2, oc3, oc4], o_kpis):
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="kpi-card">
+                        <div class="kpi-label">{label}</div>
+                        <div class="kpi-number">{number}</div>
+                        <div class="kpi-desc">{desc}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        st.write("")
+
+        # Editable 3 WhatsApp Message Templates
+        with st.expander("Pengaturan 3 Template Pesan WhatsApp (Gunakan {nama_usaha} & {kategori})"):
+            t_col1, t_col2, t_col3 = st.columns(3)
+            with t_col1:
+                tpl_1 = st.text_area("Pesan 1: Kenalan Awal", value=DEFAULT_WA_TEMPLATE_1, height=110, key="wa_tpl_1")
+            with t_col2:
+                tpl_2 = st.text_area("Pesan 2: Reminder 1", value=DEFAULT_WA_TEMPLATE_2, height=110, key="wa_tpl_2")
+            with t_col3:
+                tpl_3 = st.text_area("Pesan 3: Reminder 2", value=DEFAULT_WA_TEMPLATE_3, height=110, key="wa_tpl_3")
+
+        # Filters for Outreach Table
+        of1, of2, of3 = st.columns([1.2, 1.0, 1.5])
+        with of1:
+            out_niche_opts = ["Semua Niche"] + sorted(list(contactable_df["niche"].dropna().unique()))
+            sel_out_niche = st.selectbox("Filter Niche:", options=out_niche_opts, key="out_niche_filter")
+        with of2:
+            sel_out_status = st.selectbox(
+                "Status Balasan:",
+                options=["Semua Status", "Belum Membalas", "Sudah Membalas"],
+                key="out_status_filter",
+            )
+        with of3:
+            out_search = st.text_input("Cari Nama Usaha / No. Telp:", placeholder="Ketik nama usaha atau nomor...", key="out_search_q")
+
+        filtered_out = contactable_df.copy()
+        if sel_out_niche != "Semua Niche":
+            filtered_out = filtered_out[filtered_out["niche"] == sel_out_niche]
+        if sel_out_status == "Belum Membalas":
+            filtered_out = filtered_out[~filtered_out["is_replied"].astype(bool)]
+        elif sel_out_status == "Sudah Membalas":
+            filtered_out = filtered_out[filtered_out["is_replied"].astype(bool)]
+        if out_search.strip():
+            term_o = out_search.strip().lower()
+            filtered_out = filtered_out[
+                filtered_out["business_name"].astype(str).str.lower().str.contains(term_o)
+                | filtered_out["phone_number"].astype(str).str.lower().str.contains(term_o)
+            ]
+
+        if not filtered_out.empty:
+            filtered_out["wa_link_1"] = filtered_out.apply(
+                lambda r: build_whatsapp_link(r.get("phone_number"), tpl_1, str(r.get("business_name") or ""), str(r.get("category") or "")),
+                axis=1,
+            )
+            filtered_out["wa_link_2"] = filtered_out.apply(
+                lambda r: build_whatsapp_link(r.get("phone_number"), tpl_2, str(r.get("business_name") or ""), str(r.get("category") or "")),
+                axis=1,
+            )
+            filtered_out["wa_link_3"] = filtered_out.apply(
+                lambda r: build_whatsapp_link(r.get("phone_number"), tpl_3, str(r.get("business_name") or ""), str(r.get("category") or "")),
+                axis=1,
+            )
+
+            editor_cols = [
+                "id",
+                "niche",
+                "business_name",
+                "category",
+                "rating",
+                "reviews_count",
+                "phone_number",
+                "google_url",
+                "wa_link_1",
+                "wa_link_2",
+                "wa_link_3",
+                "is_replied",
+                "reply_notes",
+            ]
+            editor_df = filtered_out[[c for c in editor_cols if c in filtered_out.columns]].copy()
+
+            edited_df = st.data_editor(
+                editor_df,
+                use_container_width=True,
+                hide_index=True,
+                height=460,
+                key="outreach_data_editor",
+                disabled=[
+                    "id",
+                    "niche",
+                    "business_name",
+                    "category",
+                    "rating",
+                    "reviews_count",
+                    "phone_number",
+                    "google_url",
+                    "wa_link_1",
+                    "wa_link_2",
+                    "wa_link_3",
+                ],
+                column_config={
+                    "id": None,
+                    "niche": st.column_config.TextColumn("Niche", width="small"),
+                    "business_name": st.column_config.TextColumn("Nama Usaha", width="medium"),
+                    "category": st.column_config.TextColumn("Kategori", width="small"),
+                    "rating": st.column_config.NumberColumn("Rating", format="%.1f ★", width="small"),
+                    "reviews_count": st.column_config.NumberColumn("Ulasan", format="%d", width="small"),
+                    "phone_number": st.column_config.TextColumn("No. Telp", width="medium"),
+                    "google_url": st.column_config.LinkColumn("Link GMaps", display_text="Buka Maps", width="small"),
+                    "wa_link_1": st.column_config.LinkColumn("WA 1 (Kenalan)", display_text="Kenalan Awal", width="small"),
+                    "wa_link_2": st.column_config.LinkColumn("WA 2 (Reminder 1)", display_text="Reminder 1", width="small"),
+                    "wa_link_3": st.column_config.LinkColumn("WA 3 (Reminder 2)", display_text="Reminder 2", width="small"),
+                    "is_replied": st.column_config.CheckboxColumn("Sudah Membalas", width="small"),
+                    "reply_notes": st.column_config.TextColumn("Isi Balasan / Catatan", width="large"),
+                },
+            )
+
+            save_col1, save_col2 = st.columns([1.4, 3.0], vertical_alignment="center")
+            with save_col1:
+                if st.button("Simpan Perubahan ke Database", type="primary", use_container_width=True, key="save_outreach_btn"):
+                    updates_payload = [
+                        {
+                            "id": row["id"],
+                            "is_replied": bool(row["is_replied"]),
+                            "reply_notes": str(row["reply_notes"] or ""),
+                        }
+                        for _, row in edited_df.iterrows()
+                        if row.get("id")
+                    ]
+                    saved_n = db_instance.update_outreach_batch(updates_payload)
+                    load_saved_entities_from_db(db_instance)
+                    st.success(f"Berhasil menyimpan status balasan untuk {saved_n} kontak ke {db_backend_label}!")
+                    st.rerun()
+            with save_col2:
+                st.caption(f"Menampilkan **{len(editor_df)}** kontak bernomor telepon aktif. Perubahan baru akan tersimpan permanen setelah menekan tombol Simpan.")
+        else:
+            st.info("Tidak ada kontak dengan nomor telepon yang sesuai filter saat ini.")
 
 # Footer
 st.markdown(
