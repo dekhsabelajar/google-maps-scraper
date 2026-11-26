@@ -24,6 +24,15 @@ from core.maps_worker import MapsWorker
 from storage.database import DatabaseManager
 
 
+# --- PAGE CONFIGURATION (must be first Streamlit command) ---
+st.set_page_config(
+    page_title="B2B Micro-SaaS Market Intelligence",
+    page_icon=None,
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+
 @st.cache_resource
 def ensure_playwright_installed():
     """Ensure Playwright Chromium binary is downloaded in cloud container environments."""
@@ -38,8 +47,6 @@ def ensure_playwright_installed():
     except Exception:
         pass
 
-
-ensure_playwright_installed()
 
 T = TypeVar("T")
 
@@ -58,15 +65,6 @@ def run_async(coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> T:
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(_runner).result()
-
-
-# --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="B2B Micro-SaaS Market Intelligence",
-    page_icon=None,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
 
 # --- MINIMALIST CORPORATE CSS ---
 st.markdown(
@@ -517,6 +515,7 @@ if run_scrape_btn:
     elif not all_location_tags:
         st.warning("Pilih atau tambahkan minimal satu tag lokasi (contoh: `Yogyakarta`, `Klaten`, `Magelang`).")
     else:
+        ensure_playwright_installed()
         t_start = time.perf_counter()
         kw_preview = ", ".join(all_keywords[:3]) + (f" (+{len(all_keywords) - 3} lainnya)" if len(all_keywords) > 3 else "")
         status_box = st.status(
