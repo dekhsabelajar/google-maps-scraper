@@ -32,6 +32,15 @@ from core.outreach import (
 from storage.database import DatabaseManager
 
 
+# --- PAGE CONFIGURATION (must be first Streamlit command) ---
+st.set_page_config(
+    page_title="B2B Micro-SaaS Market Intelligence",
+    page_icon=None,
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+
 @st.cache_resource
 def ensure_playwright_installed():
     """Ensure Playwright Chromium binary is downloaded in cloud container environments."""
@@ -46,8 +55,6 @@ def ensure_playwright_installed():
     except Exception:
         pass
 
-
-ensure_playwright_installed()
 
 T = TypeVar("T")
 
@@ -66,15 +73,6 @@ def run_async(coro_factory: Callable[[], Coroutine[Any, Any, T]]) -> T:
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(_runner).result()
-
-
-# --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="B2B Micro-SaaS Market Intelligence",
-    page_icon=None,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
 
 # --- MINIMALIST CORPORATE CSS ---
 st.markdown(
@@ -506,8 +504,16 @@ def get_db() -> DatabaseManager:
 # --- AUTH GATE ---
 require_internal_auth()
 
-db_instance = get_db()
-db_backend_label = db_instance.get_storage_backend_label()
+try:
+    db_instance = get_db()
+    db_backend_label = db_instance.get_storage_backend_label()
+except Exception as db_exc:
+    st.error(
+        f"Gagal terhubung ke database ({type(db_exc).__name__}): {db_exc}\n\n"
+        "Pastikan `SUPABASE_DB_URL` di Streamlit Cloud Secrets memakai host pooler IPv4 "
+        "(`aws-0-ap-northeast-1.pooler.supabase.com:6543`) dengan password ter-encode (`%21` untuk `!`)."
+    )
+    st.stop()
 
 if "live_df" not in st.session_state:
     load_saved_entities_from_db(db_instance)
@@ -632,6 +638,7 @@ if run_scrape_btn:
     elif not all_location_tags:
         st.warning("Pilih atau tambahkan minimal satu tag lokasi (contoh: `Yogyakarta`, `Klaten`, `Magelang`).")
     else:
+        ensure_playwright_installed()
         t_start = time.perf_counter()
         kw_preview = ", ".join(all_keywords[:3]) + (f" (+{len(all_keywords) - 3} lainnya)" if len(all_keywords) > 3 else "")
         status_box = st.status(
