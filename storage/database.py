@@ -21,6 +21,7 @@ from sqlalchemy import (
     Enum as SAEnum,
     Index,
     select,
+    text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 
@@ -52,6 +53,10 @@ class BusinessEntity(Base):
     website_url = Column(Text, nullable=True)
     rating = Column(Float, nullable=True)
     reviews_count = Column(Integer, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    kecamatan = Column(String(120), nullable=True)
+    kota_kabupaten = Column(String(120), nullable=True)
     extracted_emails = Column(Text, nullable=True)  # Stored as JSON string
     enrichment_status = Column(SAEnum(EnrichmentStatus), nullable=False, default=EnrichmentStatus.PENDING)
     scraped_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -80,6 +85,10 @@ class BusinessEntity(Base):
             "website_url": self.website_url,
             "rating": self.rating,
             "reviews_count": self.reviews_count,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "kecamatan": self.kecamatan,
+            "kota_kabupaten": self.kota_kabupaten,
             "extracted_emails": emails,
             "enrichment_status": self.enrichment_status.value if hasattr(self.enrichment_status, "value") else str(self.enrichment_status),
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
@@ -147,6 +156,25 @@ class DatabaseManager:
 
     def create_tables(self):
         Base.metadata.create_all(self.engine)
+        self._ensure_geo_columns()
+
+    def _ensure_geo_columns(self):
+        """Safely migrate existing SQLite databases to include geo-intelligence columns."""
+        if "sqlite" not in self.db_url:
+            return
+        geo_cols = {
+            "latitude": "FLOAT",
+            "longitude": "FLOAT",
+            "kecamatan": "VARCHAR(120)",
+            "kota_kabupaten": "VARCHAR(120)",
+        }
+        with self.engine.begin() as conn:
+            existing = {
+                row[1] for row in conn.execute(text("PRAGMA table_info(business_entities)")).fetchall()
+            }
+            for col_name, col_type in geo_cols.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE business_entities ADD COLUMN {col_name} {col_type}"))
 
     def insert_or_update_entity(
         self,
@@ -159,6 +187,10 @@ class DatabaseManager:
         rating: Optional[float] = None,
         reviews_count: Optional[int] = None,
         enrichment_status: Optional[EnrichmentStatus] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        kecamatan: Optional[str] = None,
+        kota_kabupaten: Optional[str] = None,
     ) -> Tuple[BusinessEntity, bool]:
         """
         Deduplication logic (FR-07):
@@ -197,6 +229,14 @@ class DatabaseManager:
                     existing.rating = rating
                 if reviews_count is not None:
                     existing.reviews_count = reviews_count
+                if existing.latitude is None and latitude is not None:
+                    existing.latitude = latitude
+                if existing.longitude is None and longitude is not None:
+                    existing.longitude = longitude
+                if (not existing.kecamatan or existing.kecamatan == "Tidak Diketahui") and kecamatan:
+                    existing.kecamatan = kecamatan
+                if (not existing.kota_kabupaten or existing.kota_kabupaten == "Tidak Diketahui") and kota_kabupaten:
+                    existing.kota_kabupaten = kota_kabupaten
 
                 session.commit()
                 return existing, False
@@ -211,6 +251,10 @@ class DatabaseManager:
                 website_url=website_url,
                 rating=rating,
                 reviews_count=reviews_count,
+                latitude=latitude,
+                longitude=longitude,
+                kecamatan=kecamatan,
+                kota_kabupaten=kota_kabupaten,
                 enrichment_status=initial_status,
                 scraped_at=datetime.now(timezone.utc),
                 dedup_hash=dedup_hash,

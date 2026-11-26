@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from config.settings import settings
+from core.geo_intelligence import extract_admin_region, extract_coords_from_url
 from core.normalizer import (
     is_blacklisted_domain,
     normalize_phone_number,
@@ -177,6 +178,9 @@ def parse_feed_html(html: str, limit: Optional[int] = None) -> List[Dict[str, An
         if "ChI" in google_url:
             place_id = "ChI" + google_url.split("?")[0].split("ChI", 1)[1].split("!")[0]
 
+        lat, lon = extract_coords_from_url(google_url)
+        kecamatan, kota_kab = extract_admin_region(address)
+
         businesses.append({
             "business_name": store_name,
             "place_id": place_id,
@@ -187,6 +191,10 @@ def parse_feed_html(html: str, limit: Optional[int] = None) -> List[Dict[str, An
             "google_url": google_url,
             "rating": rating,
             "reviews_count": reviews_count,
+            "latitude": lat,
+            "longitude": lon,
+            "kecamatan": kecamatan,
+            "kota_kabupaten": kota_kab,
         })
 
     return businesses
@@ -231,6 +239,9 @@ def parse_single_place_html(html: str, current_url: str = "") -> Optional[Dict[s
     if "ChI" in current_url:
         place_id = "ChI" + current_url.split("?")[0].split("ChI", 1)[1].split("!")[0]
 
+    lat, lon = extract_coords_from_url(current_url)
+    kecamatan, kota_kab = extract_admin_region(address)
+
     return {
         "business_name": store_name,
         "place_id": place_id,
@@ -241,6 +252,10 @@ def parse_single_place_html(html: str, current_url: str = "") -> Optional[Dict[s
         "google_url": current_url,
         "rating": rating,
         "reviews_count": reviews_count,
+        "latitude": lat,
+        "longitude": lon,
+        "kecamatan": kecamatan,
+        "kota_kabupaten": kota_kab,
     }
 
 
@@ -505,6 +520,11 @@ class MapsWorker:
             else:
                 enrich_status = EnrichmentStatus.PENDING
 
+            kec_val = item.get("kecamatan")
+            kota_val = item.get("kota_kabupaten")
+            if (not kec_val or kec_val == "Tidak Diketahui") and item.get("address"):
+                kec_val, kota_val = extract_admin_region(item.get("address"))
+
             entity, _ = self.db.insert_or_update_entity(
                 search_keyword=keyword,
                 business_name=item["business_name"],
@@ -515,6 +535,10 @@ class MapsWorker:
                 rating=item.get("rating"),
                 reviews_count=item.get("reviews_count"),
                 enrichment_status=enrich_status,
+                latitude=item.get("latitude"),
+                longitude=item.get("longitude"),
+                kecamatan=kec_val,
+                kota_kabupaten=kota_val,
             )
             entity_dict = entity.to_dict()
             results.append(entity_dict)
