@@ -5,10 +5,11 @@ Geo-Intelligence & Spatial Market Analysis module:
 - Detects single-outlet SMEs vs multi-branch chains
 - Computes kecamatan-level Whitespace & Demand-to-Supply opportunity scores
 """
+import hashlib
 import math
 import re
 from typing import Dict, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import pandas as pd
 
@@ -53,6 +54,40 @@ _BRANCH_NOISE_RE = re.compile(
 )
 
 
+_REGION_CENTROIDS: Dict[str, Tuple[float, float]] = {
+    "yogyakarta": (-7.795580, 110.369490),
+    "diy yogyakarta": (-7.795580, 110.369490),
+    "sleman": (-7.732521, 110.355423),
+    "bantul": (-7.889762, 110.328209),
+    "kulon progo": (-7.826667, 110.164167),
+    "gunungkidul": (-7.983333, 110.600000),
+    "wonosari": (-7.966667, 110.600000),
+    "klaten": (-7.705833, 110.606111),
+    "magelang": (-7.479734, 110.217697),
+    "solo": (-7.575489, 110.824327),
+    "surakarta": (-7.575489, 110.824327),
+    "semarang": (-6.966667, 110.416664),
+    "salatiga": (-7.330523, 110.508423),
+    "jakarta": (-6.208763, 106.845599),
+    "jakarta selatan": (-6.261493, 106.810600),
+    "jakarta pusat": (-6.186486, 106.834091),
+    "jakarta barat": (-6.167431, 106.763725),
+    "jakarta timur": (-6.225014, 106.900447),
+    "jakarta utara": (-6.138414, 106.863956),
+    "bogor": (-6.597147, 106.806039),
+    "depok": (-6.402484, 106.794243),
+    "tangerang": (-6.170180, 106.640324),
+    "bekasi": (-6.238270, 106.975573),
+    "bandung": (-6.917464, 107.619123),
+    "surabaya": (-7.257472, 112.752088),
+    "malang": (-7.966620, 112.632629),
+    "bali": (-8.409518, 115.188919),
+    "denpasar": (-8.670458, 115.212629),
+    "medan": (3.595196, 98.672226),
+    "makassar": (-5.147665, 119.432731),
+}
+
+
 def extract_coords_from_url(url: Optional[str]) -> Tuple[Optional[float], Optional[float]]:
     """
     Extract (latitude, longitude) from a Google Maps URL without external API calls.
@@ -61,7 +96,8 @@ def extract_coords_from_url(url: Optional[str]) -> Tuple[Optional[float], Option
     if not url or not isinstance(url, str):
         return None, None
 
-    match = _PIN_COORD_RE.search(url) or _VIEWPORT_COORD_RE.search(url)
+    decoded_url = unquote(url)
+    match = _PIN_COORD_RE.search(decoded_url) or _VIEWPORT_COORD_RE.search(decoded_url)
     if not match:
         return None, None
 
@@ -73,6 +109,29 @@ def extract_coords_from_url(url: Optional[str]) -> Tuple[Optional[float], Option
     except ValueError:
         pass
     return None, None
+
+
+def _estimate_coords_from_region(
+    name: str,
+    kota_kab: str,
+    region: str,
+    address: str,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Deterministic regional centroid fallback with small jitter when exact pin coords are absent."""
+    haystack = f"{kota_kab} {region} {address}".lower()
+    base = None
+    for key, coords in _REGION_CENTROIDS.items():
+        if key in haystack:
+            base = coords
+            break
+    if base is None:
+        return None, None
+
+    digest = hashlib.md5(f"{name}|{address}".encode("utf-8")).hexdigest()
+    # Deterministic offset within ~1.5km radius so markers/hexagons distribute cleanly
+    lat_off = ((int(digest[:4], 16) / 65535.0) - 0.5) * 0.025
+    lon_off = ((int(digest[4:8], 16) / 65535.0) - 0.5) * 0.025
+    return round(base[0] + lat_off, 6), round(base[1] + lon_off, 6)
 
 
 def extract_admin_region(
@@ -170,6 +229,25 @@ def enrich_geo_and_scale_df(df: pd.DataFrame) -> pd.DataFrame:
     else:
         out["kecamatan"] = out["kecamatan"].fillna("Tidak Diketahui").replace("", "Tidak Diketahui")
         out["kota_kabupaten"] = out["kota_kabupaten"].fillna("Tidak Diketahui").replace("", "Tidak Diketahui")
+
+    # Fallback regional centroid for rows still missing coordinates
+    still_missing = out["latitude"].isna() | out["longitude"].isna()
+    out["coord_source"] = "Presisi GPS"
+    if still_missing.any():
+        out.loc[still_missing, "coord_source"] = "Estimasi Wilayah"
+        est = out.loc[still_missing].apply(
+            lambda r: _estimate_coords_from_region(
+                str(r.get("business_name") or ""),
+                str(r.get("kota_kabupaten") or ""),
+                str(r.get("region") or ""),
+                str(r.get("address") or ""),
+            ),
+            axis=1,
+        )
+        out.loc[still_missing, "latitude"] = [e[0] for e in est]
+        out.loc[still_missing, "longitude"] = [e[1] for e in est]
+        out["latitude"] = pd.to_numeric(out["latitude"], errors="coerce")
+        out["longitude"] = pd.to_numeric(out["longitude"], errors="coerce")
 
     # 3. Multi-branch / chain detection
     domains = out["website_url"].apply(_extract_custom_domain) if "website_url" in out.columns else pd.Series([""] * len(out), index=out.index)

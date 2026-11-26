@@ -25,6 +25,13 @@ def test_extract_coords_fallback_to_viewport():
     assert lon == 110.389123
 
 
+def test_extract_coords_url_encoded():
+    url = "https://www.google.com/maps/place/Test/data=%214m7%213m6%211s0x2e%218m2%213d-7.751234%214d110.371234"
+    lat, lon = extract_coords_from_url(url)
+    assert lat == -7.751234
+    assert lon == 110.371234
+
+
 def test_extract_admin_region_parses_kecamatan_and_kabupaten():
     addr = "Jl. Kaliurang KM 7, Kec. Depok, Kabupaten Sleman, Daerah Istimewa Yogyakarta 55281"
     kec, kota = extract_admin_region(addr)

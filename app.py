@@ -920,6 +920,7 @@ else:
 
         coord_mask = geo_df["latitude"].notna() & geo_df["longitude"].notna()
         mapped_count = int(coord_mask.sum())
+        exact_gps_count = int((coord_mask & (geo_df.get("coord_source", "") == "Presisi GPS")).sum())
         kec_count = int(geo_df.loc[geo_df["kecamatan"] != "Tidak Diketahui", "kecamatan"].nunique())
         umkm_pct = float((geo_df["business_scale"] == "UMKM Tunggal").mean() * 100) if len(geo_df) else 0.0
         chain_count = int((geo_df["business_scale"] == "Jaringan / Multi-Cabang").sum())
@@ -927,33 +928,44 @@ else:
         top_ws_kec = ws_df.iloc[0]["kecamatan"] if not ws_df.empty else "-"
         top_ws_score = f"{ws_df.iloc[0]['whitespace_score']:.1f}/100" if not ws_df.empty else "-"
 
-        g_c1, g_c2, g_c3, g_c4 = st.columns(4)
-        with g_c1:
-            st.metric("Kecamatan Teridentifikasi", f"{kec_count} Kecamatan")
-        with g_c2:
-            st.metric("Whitespace Teratas", top_ws_kec, f"Skor Peluang: {top_ws_score}")
-        with g_c3:
-            st.metric("Proporsi UMKM Tunggal", f"{umkm_pct:.1f}%", f"{chain_count} Entitas Multi-Cabang")
-        with g_c4:
-            st.metric("Titik Koordinat Terpetakan", f"{mapped_count} / {len(geo_df)}")
+        geo_kpis = [
+            ("Kecamatan Teridentifikasi", f"{kec_count}", "Wilayah administratif terdeteksi"),
+            ("Whitespace Teratas", top_ws_kec, f"Skor Peluang: {top_ws_score}"),
+            ("Proporsi UMKM Tunggal", f"{umkm_pct:.1f}%", f"{chain_count} Entitas Multi-Cabang"),
+            ("Koordinat Terpetakan", f"{mapped_count} / {len(geo_df)}", f"{exact_gps_count} Presisi GPS"),
+        ]
+        gc1, gc2, gc3, gc4 = st.columns(4)
+        for col, (label, number, desc) in zip([gc1, gc2, gc3, gc4], geo_kpis):
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="kpi-card">
+                        <div class="kpi-label">{label}</div>
+                        <div class="kpi-number">{number}</div>
+                        <div class="kpi-desc">{desc}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
         st.write("")
+        st.markdown("#### Peta Sebaran & Kepadatan Pasar")
 
         # Map Controls
-        mc1, mc2, mc3 = st.columns([1.4, 1.3, 1.3])
+        mc1, mc2, mc3 = st.columns([1.8, 1.1, 1.1])
         with mc1:
             map_mode = st.radio(
-                "Mode Peta:",
-                options=["Sebaran Titik Bisnis (Scatter)", "Peta Kepadatan (Hexagon Heatmap)"],
+                "Mode Peta",
+                options=["Titik Bisnis (Scatter)", "Kepadatan Area (Hexagon)"],
                 horizontal=True,
                 key="geo_map_mode",
             )
         with mc2:
             niche_filter_opts = ["Semua Niche"] + sorted(list(geo_df["niche"].dropna().unique()))
-            sel_geo_niche = st.selectbox("Filter Niche Peta:", options=niche_filter_opts, key="geo_niche_filter")
+            sel_geo_niche = st.selectbox("Filter Niche", options=niche_filter_opts, key="geo_niche_filter")
         with mc3:
             scale_filter_opts = ["Semua Skala", "UMKM Tunggal", "Jaringan / Multi-Cabang"]
-            sel_geo_scale = st.selectbox("Filter Skala Usaha:", options=scale_filter_opts, key="geo_scale_filter")
+            sel_geo_scale = st.selectbox("Filter Skala Usaha", options=scale_filter_opts, key="geo_scale_filter")
 
         map_df = geo_df[coord_mask].copy()
         if sel_geo_niche != "Semua Niche":
@@ -962,44 +974,50 @@ else:
             map_df = map_df[map_df["business_scale"] == sel_geo_scale]
 
         if not map_df.empty:
-            # Color coding: Green [22, 163, 74] for UMKM without website (high digital opportunity),
-            # Blue [37, 99, 235] for UMKM with website, Amber [217, 119, 6] for Multi-Branch
-            def _point_color(row):
-                if row.get("business_scale") == "Jaringan / Multi-Cabang":
-                    return [217, 119, 6, 200]
-                has_w = bool(str(row.get("website_url") or "").strip())
-                return [37, 99, 235, 190] if has_w else [22, 163, 74, 210]
-
-            map_df["color"] = map_df.apply(_point_color, axis=1)
-            map_df["radius"] = map_df["reviews_count"].apply(lambda r: min(260, max(55, 45 + int(r) * 0.4)))
-            map_df["rating_str"] = map_df["rating"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-")
+            map_df["latitude"] = pd.to_numeric(map_df["latitude"], errors="coerce")
+            map_df["longitude"] = pd.to_numeric(map_df["longitude"], errors="coerce")
+            map_df = map_df.dropna(subset=["latitude", "longitude"]).copy()
 
             center_lat = float(map_df["latitude"].mean())
             center_lon = float(map_df["longitude"].mean())
+            is_hexagon = "Hexagon" in map_mode
 
             view_state = pdk.ViewState(
                 latitude=center_lat,
                 longitude=center_lon,
                 zoom=11.2,
-                pitch=35 if "Hexagon" in map_mode else 0,
+                pitch=40 if is_hexagon else 0,
             )
 
-            if "Hexagon" in map_mode:
+            if is_hexagon:
+                hex_df = map_df[["longitude", "latitude"]].astype(float).reset_index(drop=True)
                 layer = pdk.Layer(
                     "HexagonLayer",
-                    data=map_df,
+                    data=hex_df,
                     get_position=["longitude", "latitude"],
                     radius=450,
                     elevation_scale=12,
                     elevation_range=[0, 1200],
                     pickable=True,
                     extruded=True,
+                    coverage=0.85,
                 )
                 tooltip = {"text": "Kepadatan Area\nJumlah Entitas: {elevationValue}"}
             else:
+                def _point_color(row):
+                    if row.get("business_scale") == "Jaringan / Multi-Cabang":
+                        return [217, 119, 6, 200]
+                    has_w = bool(str(row.get("website_url") or "").strip())
+                    return [37, 99, 235, 190] if has_w else [22, 163, 74, 210]
+
+                scatter_df = map_df.copy()
+                scatter_df["color"] = scatter_df.apply(_point_color, axis=1)
+                scatter_df["radius"] = scatter_df["reviews_count"].apply(lambda r: min(240, max(60, 50 + int(r) * 0.35)))
+                scatter_df["rating_str"] = scatter_df["rating"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-")
+
                 layer = pdk.Layer(
                     "ScatterplotLayer",
-                    data=map_df,
+                    data=scatter_df,
                     get_position=["longitude", "latitude"],
                     get_fill_color="color",
                     get_radius="radius",
@@ -1026,39 +1044,50 @@ else:
                     map_style=None,
                 ),
                 use_container_width=True,
+                height=420,
             )
-            st.caption("Keterangan warna titik: Hijau = UMKM Tanpa Website (Peluang Digital) | Biru = UMKM Memiliki Website | Oranye = Jaringan / Multi-Cabang")
-        else:
-            st.info("Belum ada titik koordinat yang sesuai filter atau hasil scrape belum memuat koordinat lokasi.")
-
-        st.write("")
-
-        # Whitespace & Multi-Branch Analytics
-        geo_left, geo_right = st.columns([1.6, 1.0])
-
-        with geo_left:
-            st.caption("Indeks Whitespace & Demand-to-Supply per Kecamatan")
-            if not ws_df.empty:
-                st.dataframe(
-                    ws_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "kecamatan": st.column_config.TextColumn("Kecamatan", width="medium"),
-                        "niche": st.column_config.TextColumn("Niche", width="small"),
-                        "jumlah_kompetitor": st.column_config.NumberColumn("Kompetitor", format="%d"),
-                        "rata_rata_ulasan": st.column_config.NumberColumn("Avg Ulasan", format="%.1f"),
-                        "rata_rata_rating": st.column_config.NumberColumn("Avg Rating", format="%.2f ★"),
-                        "tanpa_website_pct": st.column_config.NumberColumn("Tanpa Web", format="%.0f%%"),
-                        "whitespace_score": st.column_config.ProgressColumn("Skor Whitespace", min_value=0, max_value=100, format="%.1f"),
-                        "status_pasar": st.column_config.TextColumn("Status Pasar", width="medium"),
-                    },
-                )
+            if is_hexagon:
+                st.caption("Semakin tinggi & terang kolom heksagon, semakin tinggi konsentrasi kompetitor pada area radius 450m.")
             else:
-                st.info("Nama kecamatan belum terdeteksi pada alamat hasil scrape. Aktifkan 'Ambil No. HP & Website (Detail Paralel)' agar alamat lengkap terambil.")
+                st.caption("Keterangan warna: Hijau = UMKM Tanpa Website (Peluang Digital) | Biru = UMKM Memiliki Website | Oranye = Jaringan / Multi-Cabang")
+        else:
+            st.info("Belum ada titik koordinat yang sesuai filter atau lokasi belum dikenali.")
 
-        with geo_right:
-            st.caption("Distribusi Skala Usaha (UMKM Tunggal vs Jaringan)")
+        st.divider()
+
+        # Section 2: Full-width Whitespace Table
+        st.markdown("#### Indeks Whitespace & Demand-to-Supply per Kecamatan")
+        st.caption("Kecamatan dengan skor tertinggi menandakan permintaan pasar tinggi (banyak ulasan) namun kepadatan kompetitor masih rendah.")
+        if not ws_df.empty:
+            st.dataframe(
+                ws_df,
+                use_container_width=True,
+                hide_index=True,
+                height=320,
+                column_config={
+                    "kecamatan": st.column_config.TextColumn("Kecamatan", width="medium"),
+                    "niche": st.column_config.TextColumn("Niche", width="small"),
+                    "jumlah_kompetitor": st.column_config.NumberColumn("Kompetitor", format="%d"),
+                    "total_ulasan": st.column_config.NumberColumn("Total Ulasan", format="%d"),
+                    "rata_rata_ulasan": st.column_config.NumberColumn("Avg Ulasan", format="%.1f"),
+                    "rata_rata_rating": st.column_config.NumberColumn("Avg Rating", format="%.2f ★"),
+                    "tanpa_website_pct": st.column_config.NumberColumn("Tanpa Web", format="%.0f%%"),
+                    "umkm_tunggal_pct": st.column_config.NumberColumn("UMKM Tunggal", format="%.0f%%"),
+                    "whitespace_score": st.column_config.ProgressColumn("Skor Whitespace", min_value=0, max_value=100, format="%.1f"),
+                    "status_pasar": st.column_config.TextColumn("Status Pasar", width="medium"),
+                },
+            )
+        else:
+            st.info("Nama kecamatan belum terdeteksi pada alamat hasil scrape. Aktifkan 'Ambil No. HP & Website (Detail Paralel)' agar alamat lengkap terambil.")
+
+        st.divider()
+
+        # Section 3: Balanced 2-column Business Scale Breakdown
+        st.markdown("#### Analisis Skala Usaha: UMKM Tunggal vs Jaringan Multi-Cabang")
+        scale_left, scale_right = st.columns([1.0, 1.5], gap="large")
+
+        with scale_left:
+            st.caption("Proporsi Skala Usaha")
             scale_counts = geo_df["business_scale"].value_counts().reset_index()
             scale_counts.columns = ["Skala", "Jumlah"]
             chart_scale = (
@@ -1074,24 +1103,47 @@ else:
                     ),
                     tooltip=["Skala:N", "Jumlah:Q"],
                 )
-                .properties(height=200)
+                .properties(height=240)
             )
             st.altair_chart(chart_scale, use_container_width=True)
 
+        with scale_right:
             chains_df = geo_df[geo_df["business_scale"] == "Jaringan / Multi-Cabang"][
                 [c for c in ["business_name", "branch_count", "kecamatan", "website_url"] if c in geo_df.columns]
             ].drop_duplicates(subset=["business_name"])
             if not chains_df.empty:
-                st.caption("Entitas Terdeteksi Multi-Cabang / Jaringan:")
+                st.caption("Entitas Terdeteksi Multi-Cabang / Jaringan")
                 st.dataframe(
                     chains_df.head(15),
                     use_container_width=True,
                     hide_index=True,
+                    height=240,
                     column_config={
                         "business_name": st.column_config.TextColumn("Nama Brand / Cabang"),
                         "branch_count": st.column_config.NumberColumn("Estimasi Cabang", format="%d"),
                         "kecamatan": st.column_config.TextColumn("Kecamatan"),
                         "website_url": st.column_config.LinkColumn("Website"),
+                    },
+                )
+            else:
+                st.caption("Top UMKM Tunggal Tanpa Website (Prioritas Prospek Digital)")
+                no_web_mask = geo_df["website_url"].isna() | (geo_df["website_url"].astype(str).str.strip() == "")
+                top_umkm = (
+                    geo_df[no_web_mask]
+                    .sort_values(by="reviews_count", ascending=False)
+                    [[c for c in ["business_name", "kecamatan", "reviews_count", "phone_number"] if c in geo_df.columns]]
+                    .head(15)
+                )
+                st.dataframe(
+                    top_umkm,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=240,
+                    column_config={
+                        "business_name": st.column_config.TextColumn("Nama Usaha"),
+                        "kecamatan": st.column_config.TextColumn("Kecamatan"),
+                        "reviews_count": st.column_config.NumberColumn("Ulasan", format="%d"),
+                        "phone_number": st.column_config.TextColumn("Telepon (+62)"),
                     },
                 )
 
