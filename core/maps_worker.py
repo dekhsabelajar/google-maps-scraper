@@ -511,6 +511,7 @@ class MapsWorker:
             logger.info(f"[FastScraper] Fetching phone & website for {len(raw_items)} places (pool={detail_concurrency})...")
             await self._enrich_details_pool(context, raw_items, concurrency=detail_concurrency)
 
+        batch_payload: List[Dict[str, Any]] = []
         for item in raw_items:
             phone_normalized = normalize_phone_number(item.get("phone_raw"))
             website_normalized = normalize_url(item.get("website_raw"))
@@ -525,25 +526,26 @@ class MapsWorker:
             if (not kec_val or kec_val == "Tidak Diketahui") and item.get("address"):
                 kec_val, kota_val = extract_admin_region(item.get("address"))
 
-            entity, _ = self.db.insert_or_update_entity(
-                search_keyword=keyword,
-                business_name=item["business_name"],
-                category=item.get("category"),
-                address=item.get("address"),
-                phone_number=phone_normalized,
-                website_url=website_normalized,
-                rating=item.get("rating"),
-                reviews_count=item.get("reviews_count"),
-                enrichment_status=enrich_status,
-                latitude=item.get("latitude"),
-                longitude=item.get("longitude"),
-                kecamatan=kec_val,
-                kota_kabupaten=kota_val,
-                google_url=item.get("google_url"),
-            )
-            entity_dict = entity.to_dict()
-            results.append(entity_dict)
-            if on_progress:
+            batch_payload.append({
+                "search_keyword": keyword,
+                "business_name": item["business_name"],
+                "category": item.get("category"),
+                "address": item.get("address"),
+                "phone_number": phone_normalized,
+                "website_url": website_normalized,
+                "rating": item.get("rating"),
+                "reviews_count": item.get("reviews_count"),
+                "enrichment_status": enrich_status,
+                "latitude": item.get("latitude"),
+                "longitude": item.get("longitude"),
+                "kecamatan": kec_val,
+                "kota_kabupaten": kota_val,
+                "google_url": item.get("google_url"),
+            })
+
+        results = self.db.bulk_upsert_entities(batch_payload)
+        if on_progress:
+            for entity_dict in results:
                 on_progress(entity_dict)
 
         logger.info(f"[FastScraper] Extracted {len(results)} businesses for '{keyword}'.")

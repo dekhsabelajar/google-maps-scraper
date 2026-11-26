@@ -336,6 +336,105 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def bulk_upsert_entities(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        High-performance batch upsert: fetches existing entities in 1 SELECT and commits
+        all inserts/updates in 1 single transaction. Avoids N+1 network roundtrips to Supabase.
+        """
+        if not items:
+            return []
+
+        prepared: List[Tuple[str, Dict[str, Any]]] = []
+        seen_in_batch: set[str] = set()
+        for item in items:
+            d_hash = generate_dedup_hash(
+                item["business_name"],
+                item.get("phone_number"),
+                item.get("address"),
+            )
+            if d_hash in seen_in_batch:
+                continue
+            seen_in_batch.add(d_hash)
+            prepared.append((d_hash, item))
+
+        all_hashes = [h for h, _ in prepared]
+        session = self.Session()
+        try:
+            stmt = select(BusinessEntity).where(BusinessEntity.dedup_hash.in_(all_hashes))
+            existing_rows = session.execute(stmt).scalars().all()
+            existing_map: Dict[str, BusinessEntity] = {e.dedup_hash: e for e in existing_rows}
+
+            new_entities: List[BusinessEntity] = []
+            ordered_entities: List[BusinessEntity] = []
+            now_ts = datetime.now(timezone.utc)
+
+            for d_hash, item in prepared:
+                website_url = item.get("website_url")
+                enrichment_status = item.get("enrichment_status")
+                if enrichment_status is None:
+                    enrichment_status = EnrichmentStatus.NO_WEBSITE if not website_url else EnrichmentStatus.PENDING
+
+                existing = existing_map.get(d_hash)
+                if existing:
+                    if not existing.category and item.get("category"):
+                        existing.category = item["category"]
+                    if not existing.address and item.get("address"):
+                        existing.address = item["address"]
+                    if not existing.phone_number and item.get("phone_number"):
+                        existing.phone_number = item["phone_number"]
+                    if not existing.website_url and website_url:
+                        existing.website_url = website_url
+                        if existing.enrichment_status == EnrichmentStatus.NO_WEBSITE:
+                            existing.enrichment_status = EnrichmentStatus.PENDING
+                    if item.get("rating") is not None:
+                        existing.rating = item["rating"]
+                    if item.get("reviews_count") is not None:
+                        existing.reviews_count = item["reviews_count"]
+                    if existing.latitude is None and item.get("latitude") is not None:
+                        existing.latitude = item["latitude"]
+                    if existing.longitude is None and item.get("longitude") is not None:
+                        existing.longitude = item["longitude"]
+                    if (not existing.kecamatan or existing.kecamatan == "Tidak Diketahui") and item.get("kecamatan"):
+                        existing.kecamatan = item["kecamatan"]
+                    if (not existing.kota_kabupaten or existing.kota_kabupaten == "Tidak Diketahui") and item.get("kota_kabupaten"):
+                        existing.kota_kabupaten = item["kota_kabupaten"]
+                    if not existing.google_url and item.get("google_url"):
+                        existing.google_url = item["google_url"]
+                    ordered_entities.append(existing)
+                else:
+                    new_ent = BusinessEntity(
+                        search_keyword=item["search_keyword"],
+                        business_name=item["business_name"],
+                        category=item.get("category"),
+                        address=item.get("address"),
+                        phone_number=item.get("phone_number"),
+                        website_url=website_url,
+                        rating=item.get("rating"),
+                        reviews_count=item.get("reviews_count"),
+                        latitude=item.get("latitude"),
+                        longitude=item.get("longitude"),
+                        kecamatan=item.get("kecamatan"),
+                        kota_kabupaten=item.get("kota_kabupaten"),
+                        google_url=item.get("google_url"),
+                        is_replied=False,
+                        reply_notes="",
+                        enrichment_status=enrichment_status,
+                        scraped_at=now_ts,
+                        dedup_hash=d_hash,
+                    )
+                    new_entities.append(new_ent)
+                    ordered_entities.append(new_ent)
+
+            if new_entities:
+                session.add_all(new_entities)
+            session.commit()
+            return [e.to_dict() for e in ordered_entities]
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def get_pending_enrichment_entities(self, limit: Optional[int] = None) -> List[BusinessEntity]:
         """
         Retrieves entities ready for Stage 2 email enrichment.

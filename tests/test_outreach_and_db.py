@@ -52,3 +52,26 @@ def test_database_outreach_persistence(tmp_path):
     assert rows[0]["is_replied"] is True
     assert rows[0]["reply_notes"] == "Tertarik demo hari Jumat jam 10."
     assert rows[0]["google_url"].startswith("https://www.google.com/maps/place/")
+
+
+def test_bulk_upsert_entities_deduplicates_and_updates(tmp_path):
+    db_file = tmp_path / "test_bulk.db"
+    db = DatabaseManager(db_url=f"sqlite:///{db_file}")
+
+    first_batch = [
+        {"search_keyword": "Cafe", "business_name": "Kopi A", "address": "Jl. A", "phone_number": "+628111", "reviews_count": 10},
+        {"search_keyword": "Cafe", "business_name": "Kopi B", "address": "Jl. B", "phone_number": "+628222", "reviews_count": 20},
+        {"search_keyword": "Cafe", "business_name": "Kopi A", "address": "Jl. A", "phone_number": "+628111", "reviews_count": 10},
+    ]
+    res1 = db.bulk_upsert_entities(first_batch)
+    assert len(res1) == 2
+
+    second_batch = [
+        {"search_keyword": "Cafe", "business_name": "Kopi A", "address": "Jl. A", "phone_number": "+628111", "reviews_count": 55},
+        {"search_keyword": "Cafe", "business_name": "Kopi C", "address": "Jl. C", "phone_number": "+628333", "reviews_count": 30},
+    ]
+    res2 = db.bulk_upsert_entities(second_batch)
+    assert len(res2) == 2
+    assert db.count_entities() == 3
+    all_rows = {r["business_name"]: r for r in db.get_all_entities_as_dicts()}
+    assert all_rows["Kopi A"]["reviews_count"] == 55
