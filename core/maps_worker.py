@@ -356,15 +356,24 @@ class MapsWorker:
 
         worker_count = min(concurrency, len(pending_items))
 
-        async def _worker():
-            page = await context.new_page()
-            try:
-                await page.route(
-                    "**/*",
-                    lambda route: route.abort()
-                    if route.request.resource_type in ("image", "media", "font", "stylesheet")
-                    else route.continue_(),
+        async def _open_lightweight_page() -> Page:
+            p = await context.new_page()
+            await p.route(
+                "**/*",
+                lambda route: route.abort()
+                if (
+                    route.request.resource_type in ("image", "media", "font", "stylesheet")
+                    or "khms" in route.request.url
+                    or "/vt/" in route.request.url
                 )
+                else route.continue_(),
+            )
+            return p
+
+        async def _worker():
+            page = await _open_lightweight_page()
+            processed_in_tab = 0
+            try:
                 while not item_queue.empty():
                     try:
                         item = item_queue.get_nowait()
@@ -374,6 +383,15 @@ class MapsWorker:
                     if not url:
                         continue
                     try:
+                        # Recycle tab every 30 places to prevent Chromium JS heap bloat on 1GB cloud containers
+                        if processed_in_tab > 0 and processed_in_tab % 30 == 0:
+                            try:
+                                await page.close()
+                            except Exception:
+                                pass
+                            page = await _open_lightweight_page()
+
+                        processed_in_tab += 1
                         await page.goto(url, wait_until="domcontentloaded", timeout=12000)
                         try:
                             await page.wait_for_selector(
@@ -398,7 +416,10 @@ class MapsWorker:
                     except Exception as exc:
                         logger.debug(f"[FastScraper] Detail fetch failed for {item.get('business_name')}: {exc}")
             finally:
-                await page.close()
+                try:
+                    await page.close()
+                except Exception:
+                    pass
 
         await asyncio.gather(*(_worker() for _ in range(worker_count)))
 
@@ -409,7 +430,7 @@ class MapsWorker:
         limit: Optional[int] = 0,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
         fetch_details: bool = False,
-        detail_concurrency: int = 12,
+        detail_concurrency: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Run fast feed-HTML scraping for one search query. If limit is 0/None, scrolls until end of feed."""
         results: List[Dict[str, Any]] = []
@@ -508,8 +529,9 @@ class MapsWorker:
                 raw_items = [single]
 
         if fetch_details and raw_items:
-            logger.info(f"[FastScraper] Fetching phone & website for {len(raw_items)} places (pool={detail_concurrency})...")
-            await self._enrich_details_pool(context, raw_items, concurrency=detail_concurrency)
+            effective_concurrency = detail_concurrency if detail_concurrency is not None else (3 if sys.platform != "win32" else 6)
+            logger.info(f"[FastScraper] Fetching phone & website for {len(raw_items)} places (pool={effective_concurrency})...")
+            await self._enrich_details_pool(context, raw_items, concurrency=effective_concurrency)
 
         for item in raw_items:
             phone_normalized = normalize_phone_number(item.get("phone_raw"))
@@ -675,9 +697,15 @@ class MapsWorker:
                             task_idx += 1
                             loc_batches.append(_run_loc(loc, task_idx))
 
-                        # Execute location feeds concurrently (capped at 3 at a time)
-                        for start_i in range(0, len(loc_batches), 3):
-                            chunk = loc_batches[start_i:start_i + 3]
+                        # Execute location feeds concurrently:
+                        # On Linux/cloud (1GB RAM), run 1 location at a time when fetch_details=True (or 2 without details)
+                        # to prevent Chromium OOM kills; locally on Windows allow up to 3.
+                        if sys.platform != "win32":
+                            loc_batch_size = 1 if fetch_details else 2
+                        else:
+                            loc_batch_size = 2 if fetch_details else 3
+                        for start_i in range(0, len(loc_batches), loc_batch_size):
+                            chunk = loc_batches[start_i:start_i + loc_batch_size]
                             chunk_outputs = await asyncio.gather(*chunk)
                             for loc, loc_results in chunk_outputs:
                                 unique_for_task: List[Dict[str, Any]] = []
