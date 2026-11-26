@@ -952,7 +952,7 @@ else:
         st.markdown("#### Peta Sebaran & Kepadatan Pasar")
 
         # Map Controls
-        mc1, mc2, mc3 = st.columns([1.8, 1.1, 1.1])
+        mc1, mc2, mc3, mc4 = st.columns([1.6, 1.0, 1.0, 1.0])
         with mc1:
             map_mode = st.radio(
                 "Mode Peta",
@@ -961,13 +961,20 @@ else:
                 key="geo_map_mode",
             )
         with mc2:
+            region_filter_opts = ["Semua Wilayah (Auto-Fit)"] + sorted(
+                [r for r in geo_df["region"].dropna().unique() if str(r).strip()]
+            )
+            sel_geo_region = st.selectbox("Fokus Kota / Wilayah", options=region_filter_opts, key="geo_region_filter")
+        with mc3:
             niche_filter_opts = ["Semua Niche"] + sorted(list(geo_df["niche"].dropna().unique()))
             sel_geo_niche = st.selectbox("Filter Niche", options=niche_filter_opts, key="geo_niche_filter")
-        with mc3:
+        with mc4:
             scale_filter_opts = ["Semua Skala", "UMKM Tunggal", "Jaringan / Multi-Cabang"]
             sel_geo_scale = st.selectbox("Filter Skala Usaha", options=scale_filter_opts, key="geo_scale_filter")
 
         map_df = geo_df[coord_mask].copy()
+        if sel_geo_region != "Semua Wilayah (Auto-Fit)":
+            map_df = map_df[map_df["region"] == sel_geo_region]
         if sel_geo_niche != "Semua Niche":
             map_df = map_df[map_df["niche"] == sel_geo_niche]
         if sel_geo_scale != "Semua Skala":
@@ -978,16 +985,22 @@ else:
             map_df["longitude"] = pd.to_numeric(map_df["longitude"], errors="coerce")
             map_df = map_df.dropna(subset=["latitude", "longitude"]).copy()
 
-            center_lat = float(map_df["latitude"].mean())
-            center_lon = float(map_df["longitude"].mean())
             is_hexagon = "Hexagon" in map_mode
 
-            view_state = pdk.ViewState(
-                latitude=center_lat,
-                longitude=center_lon,
-                zoom=11.2,
-                pitch=40 if is_hexagon else 0,
-            )
+            if len(map_df) == 1:
+                view_state = pdk.ViewState(
+                    latitude=float(map_df["latitude"].iloc[0]),
+                    longitude=float(map_df["longitude"].iloc[0]),
+                    zoom=13.5,
+                    pitch=40 if is_hexagon else 0,
+                )
+            else:
+                view_state = pdk.data_utils.compute_view(
+                    map_df[["longitude", "latitude"]],
+                    view_proportion=0.75,
+                )
+                view_state.zoom = min(14.0, max(5.0, float(view_state.zoom)))
+                view_state.pitch = 40 if is_hexagon else 0
 
             if is_hexagon:
                 hex_df = map_df[["longitude", "latitude"]].astype(float).reset_index(drop=True)
@@ -1036,15 +1049,17 @@ else:
                     "style": {"backgroundColor": "#0f172a", "color": "white", "fontSize": "12px"},
                 }
 
+            deck_key = f"pydeck_{map_mode}_{sel_geo_region}_{sel_geo_niche}_{sel_geo_scale}_{len(map_df)}"
             st.pydeck_chart(
                 pdk.Deck(
                     layers=[layer],
                     initial_view_state=view_state,
                     tooltip=tooltip,
-                    map_style=None,
+                    map_style=pdk.map_styles.CARTO_ROAD,
                 ),
                 use_container_width=True,
                 height=420,
+                key=deck_key,
             )
             if is_hexagon:
                 st.caption("Semakin tinggi & terang kolom heksagon, semakin tinggi konsentrasi kompetitor pada area radius 450m.")
