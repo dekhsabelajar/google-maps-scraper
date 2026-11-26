@@ -409,7 +409,7 @@ class MapsWorker:
         limit: Optional[int] = 0,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
         fetch_details: bool = False,
-        detail_concurrency: int = 12,
+        detail_concurrency: int = 5,
     ) -> List[Dict[str, Any]]:
         """Run fast feed-HTML scraping for one search query. If limit is 0/None, scrolls until end of feed."""
         results: List[Dict[str, Any]] = []
@@ -675,9 +675,10 @@ class MapsWorker:
                             task_idx += 1
                             loc_batches.append(_run_loc(loc, task_idx))
 
-                        # Execute location feeds concurrently (capped at 3 at a time)
-                        for start_i in range(0, len(loc_batches), 3):
-                            chunk = loc_batches[start_i:start_i + 3]
+                        # Execute location feeds concurrently (capped at 2 on Linux/cloud containers to prevent OOM, 3 locally)
+                        loc_batch_size = 2 if sys.platform != "win32" else 3
+                        for start_i in range(0, len(loc_batches), loc_batch_size):
+                            chunk = loc_batches[start_i:start_i + loc_batch_size]
                             chunk_outputs = await asyncio.gather(*chunk)
                             for loc, loc_results in chunk_outputs:
                                 unique_for_task: List[Dict[str, Any]] = []

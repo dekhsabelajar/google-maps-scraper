@@ -497,10 +497,16 @@ def load_saved_entities_from_db(db: DatabaseManager) -> None:
     }
 
 
+@st.cache_resource
+def get_db() -> DatabaseManager:
+    """Reuse a single SQLAlchemy engine & connection pool across Streamlit reruns."""
+    return DatabaseManager()
+
+
 # --- AUTH GATE ---
 require_internal_auth()
 
-db_instance = DatabaseManager()
+db_instance = get_db()
 db_backend_label = db_instance.get_storage_backend_label()
 
 if "live_df" not in st.session_state:
