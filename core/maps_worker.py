@@ -308,6 +308,11 @@ class MapsWorker:
                     args=launch_args,
                     proxy=proxy_config,
                 )
+            if "shared libraries" in err_str or "libglib" in err_str:
+                logger.error(
+                    "Missing system shared libraries (e.g. libglib-2.0.so.0) for Chromium. "
+                    "Make sure packages.txt is present in your repository root."
+                )
             raise
 
     async def _enrich_details_pool(

@@ -62,6 +62,9 @@ class ReviewWorker:
                     "--use-gl=swiftshader",
                     "--window-size=1920,1080",
                     "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
                 ]
             )
             context: BrowserContext = await browser.new_context(

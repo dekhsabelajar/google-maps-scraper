@@ -21,6 +21,24 @@ import streamlit as st
 from core.maps_worker import MapsWorker
 from storage.database import DatabaseManager
 
+
+@st.cache_resource
+def ensure_playwright_installed():
+    """Ensure Playwright Chromium binary is downloaded in cloud container environments."""
+    try:
+        import subprocess
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
+ensure_playwright_installed()
+
 T = TypeVar("T")
 
 
