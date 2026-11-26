@@ -57,6 +57,7 @@ class BusinessEntity(Base):
     longitude = Column(Float, nullable=True)
     kecamatan = Column(String(120), nullable=True)
     kota_kabupaten = Column(String(120), nullable=True)
+    google_url = Column(Text, nullable=True)
     extracted_emails = Column(Text, nullable=True)  # Stored as JSON string
     enrichment_status = Column(SAEnum(EnrichmentStatus), nullable=False, default=EnrichmentStatus.PENDING)
     scraped_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -89,6 +90,7 @@ class BusinessEntity(Base):
             "longitude": self.longitude,
             "kecamatan": self.kecamatan,
             "kota_kabupaten": self.kota_kabupaten,
+            "google_url": self.google_url,
             "extracted_emails": emails,
             "enrichment_status": self.enrichment_status.value if hasattr(self.enrichment_status, "value") else str(self.enrichment_status),
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
@@ -167,6 +169,7 @@ class DatabaseManager:
             "longitude": "FLOAT",
             "kecamatan": "VARCHAR(120)",
             "kota_kabupaten": "VARCHAR(120)",
+            "google_url": "TEXT",
         }
         with self.engine.begin() as conn:
             existing = {
@@ -191,6 +194,7 @@ class DatabaseManager:
         longitude: Optional[float] = None,
         kecamatan: Optional[str] = None,
         kota_kabupaten: Optional[str] = None,
+        google_url: Optional[str] = None,
     ) -> Tuple[BusinessEntity, bool]:
         """
         Deduplication logic (FR-07):
@@ -237,6 +241,8 @@ class DatabaseManager:
                     existing.kecamatan = kecamatan
                 if (not existing.kota_kabupaten or existing.kota_kabupaten == "Tidak Diketahui") and kota_kabupaten:
                     existing.kota_kabupaten = kota_kabupaten
+                if not existing.google_url and google_url:
+                    existing.google_url = google_url
 
                 session.commit()
                 return existing, False
@@ -255,6 +261,7 @@ class DatabaseManager:
                 longitude=longitude,
                 kecamatan=kecamatan,
                 kota_kabupaten=kota_kabupaten,
+                google_url=google_url,
                 enrichment_status=initial_status,
                 scraped_at=datetime.now(timezone.utc),
                 dedup_hash=dedup_hash,

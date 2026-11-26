@@ -889,7 +889,7 @@ else:
         )
 
         show_cols = [
-            c for c in ["niche", "business_name", "business_scale", "category", "rating", "reviews_count", "phone_number", "website_url", "kecamatan", "region", "address"]
+            c for c in ["niche", "business_name", "business_scale", "category", "rating", "reviews_count", "phone_number", "website_url", "google_url", "kecamatan", "region", "address"]
             if c in filtered.columns
         ]
         st.dataframe(
@@ -905,6 +905,7 @@ else:
                 "reviews_count": st.column_config.NumberColumn("Ulasan", format="%d", width="small"),
                 "phone_number": st.column_config.TextColumn("Telepon (+62)", width="medium"),
                 "website_url": st.column_config.LinkColumn("Website", width="medium"),
+                "google_url": st.column_config.LinkColumn("Link GMaps", display_text="Buka Maps", width="small"),
                 "kecamatan": st.column_config.TextColumn("Kecamatan", width="small"),
                 "region": st.column_config.TextColumn("Wilayah", width="small"),
                 "address": st.column_config.TextColumn("Alamat Lengkap", width="large"),

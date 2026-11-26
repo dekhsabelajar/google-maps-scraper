@@ -539,6 +539,7 @@ class MapsWorker:
                 longitude=item.get("longitude"),
                 kecamatan=kec_val,
                 kota_kabupaten=kota_val,
+                google_url=item.get("google_url"),
             )
             entity_dict = entity.to_dict()
             results.append(entity_dict)
