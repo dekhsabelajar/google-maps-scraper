@@ -5,7 +5,6 @@ transaction management, and atomic checkpointing.
 import enum
 import hashlib
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +12,6 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import (
     create_engine,
-    Boolean,
     Column,
     String,
     Text,
@@ -59,10 +57,6 @@ class BusinessEntity(Base):
     longitude = Column(Float, nullable=True)
     kecamatan = Column(String(120), nullable=True)
     kota_kabupaten = Column(String(120), nullable=True)
-    google_url = Column(Text, nullable=True)
-    is_replied = Column(Boolean, nullable=False, default=False)
-    reply_notes = Column(Text, nullable=True)
-    outreach_updated_at = Column(DateTime, nullable=True)
     extracted_emails = Column(Text, nullable=True)  # Stored as JSON string
     enrichment_status = Column(SAEnum(EnrichmentStatus), nullable=False, default=EnrichmentStatus.PENDING)
     scraped_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -95,10 +89,6 @@ class BusinessEntity(Base):
             "longitude": self.longitude,
             "kecamatan": self.kecamatan,
             "kota_kabupaten": self.kota_kabupaten,
-            "google_url": self.google_url,
-            "is_replied": bool(self.is_replied) if self.is_replied is not None else False,
-            "reply_notes": self.reply_notes or "",
-            "outreach_updated_at": self.outreach_updated_at.isoformat() if self.outreach_updated_at else None,
             "extracted_emails": emails,
             "enrichment_status": self.enrichment_status.value if hasattr(self.enrichment_status, "value") else str(self.enrichment_status),
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
@@ -142,101 +132,49 @@ class BusinessReview(Base):
         }
 
 
-def _resolve_database_url(explicit_url: Optional[str] = None) -> str:
-    """
-    Resolve database connection URL in priority order:
-    1. Explicit argument
-    2. Environment variable (SUPABASE_DB_URL / DATABASE_URL)
-    3. Streamlit secrets (SUPABASE_DB_URL / DATABASE_URL)
-    4. Local SQLite fallback (settings.DATABASE_PATH)
-    """
-    raw_url = explicit_url or os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
-    if not raw_url:
-        try:
-            import streamlit as st
-            raw_url = st.secrets.get("SUPABASE_DB_URL") or st.secrets.get("DATABASE_URL")
-        except Exception:
-            raw_url = None
-
-    if raw_url and isinstance(raw_url, str) and raw_url.strip():
-        clean_url = raw_url.strip()
-        if clean_url.startswith("postgres://"):
-            clean_url = "postgresql+psycopg2://" + clean_url[len("postgres://"):]
-        elif clean_url.startswith("postgresql://"):
-            clean_url = "postgresql+psycopg2://" + clean_url[len("postgresql://"):]
-        return clean_url
-
-    db_path = settings.DATABASE_PATH
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{db_path}"
-
-
 class DatabaseManager:
     """
     Manages database sessions, deduplication logic, and atomic status checkpoints.
-    Supports Supabase (PostgreSQL) and local SQLite seamlessly.
     """
     def __init__(self, db_url: Optional[str] = None):
-        self.db_url = _resolve_database_url(db_url)
-        is_sqlite = self.db_url.startswith("sqlite")
-
-        engine_kwargs: Dict[str, Any] = {"echo": False, "future": True}
-        if is_sqlite:
-            engine_kwargs["connect_args"] = {"check_same_thread": False}
+        if not db_url:
+            db_path = settings.DATABASE_PATH
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.db_url = f"sqlite:///{db_path}"
         else:
-            engine_kwargs["pool_pre_ping"] = True
-            engine_kwargs["pool_recycle"] = 300
+            self.db_url = db_url
 
-        self.engine = create_engine(self.db_url, **engine_kwargs)
+        self.engine = create_engine(
+            self.db_url,
+            echo=False,
+            future=True,
+            connect_args={"check_same_thread": False} if "sqlite" in self.db_url else {}
+        )
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
         self.Session = scoped_session(self.session_factory)
         self.create_tables()
-
-    def get_storage_backend_label(self) -> str:
-        """Return a human-readable label for the active database backend."""
-        if "sqlite" in self.db_url:
-            return "SQLite Lokal"
-        if "supabase" in self.db_url.lower():
-            return "Supabase (PostgreSQL)"
-        return "PostgreSQL Cloud"
 
     def create_tables(self):
         Base.metadata.create_all(self.engine)
         self._ensure_geo_columns()
 
     def _ensure_geo_columns(self):
-        """Safely migrate existing SQLite or PostgreSQL tables to include geo & outreach columns."""
-        extra_cols_sqlite = {
+        """Safely migrate existing SQLite databases to include geo-intelligence columns."""
+        if "sqlite" not in self.db_url:
+            return
+        geo_cols = {
             "latitude": "FLOAT",
             "longitude": "FLOAT",
             "kecamatan": "VARCHAR(120)",
             "kota_kabupaten": "VARCHAR(120)",
-            "google_url": "TEXT",
-            "is_replied": "BOOLEAN DEFAULT 0",
-            "reply_notes": "TEXT",
-            "outreach_updated_at": "DATETIME",
-        }
-        extra_cols_pg = {
-            "latitude": "DOUBLE PRECISION",
-            "longitude": "DOUBLE PRECISION",
-            "kecamatan": "VARCHAR(120)",
-            "kota_kabupaten": "VARCHAR(120)",
-            "google_url": "TEXT",
-            "is_replied": "BOOLEAN NOT NULL DEFAULT FALSE",
-            "reply_notes": "TEXT",
-            "outreach_updated_at": "TIMESTAMP",
         }
         with self.engine.begin() as conn:
-            if "sqlite" in self.db_url:
-                existing = {
-                    row[1] for row in conn.execute(text("PRAGMA table_info(business_entities)")).fetchall()
-                }
-                for col_name, col_type in extra_cols_sqlite.items():
-                    if col_name not in existing:
-                        conn.execute(text(f"ALTER TABLE business_entities ADD COLUMN {col_name} {col_type}"))
-            else:
-                for col_name, col_type in extra_cols_pg.items():
-                    conn.execute(text(f"ALTER TABLE business_entities ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+            existing = {
+                row[1] for row in conn.execute(text("PRAGMA table_info(business_entities)")).fetchall()
+            }
+            for col_name, col_type in geo_cols.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE business_entities ADD COLUMN {col_name} {col_type}"))
 
     def insert_or_update_entity(
         self,
@@ -253,7 +191,6 @@ class DatabaseManager:
         longitude: Optional[float] = None,
         kecamatan: Optional[str] = None,
         kota_kabupaten: Optional[str] = None,
-        google_url: Optional[str] = None,
     ) -> Tuple[BusinessEntity, bool]:
         """
         Deduplication logic (FR-07):
@@ -300,8 +237,6 @@ class DatabaseManager:
                     existing.kecamatan = kecamatan
                 if (not existing.kota_kabupaten or existing.kota_kabupaten == "Tidak Diketahui") and kota_kabupaten:
                     existing.kota_kabupaten = kota_kabupaten
-                if not existing.google_url and google_url:
-                    existing.google_url = google_url
 
                 session.commit()
                 return existing, False
@@ -320,9 +255,6 @@ class DatabaseManager:
                 longitude=longitude,
                 kecamatan=kecamatan,
                 kota_kabupaten=kota_kabupaten,
-                google_url=google_url,
-                is_replied=False,
-                reply_notes="",
                 enrichment_status=initial_status,
                 scraped_at=datetime.now(timezone.utc),
                 dedup_hash=dedup_hash,
@@ -330,105 +262,6 @@ class DatabaseManager:
             session.add(new_entity)
             session.commit()
             return new_entity, True
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-    def bulk_upsert_entities(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        High-performance batch upsert: fetches existing entities in 1 SELECT and commits
-        all inserts/updates in 1 single transaction. Avoids N+1 network roundtrips to Supabase.
-        """
-        if not items:
-            return []
-
-        prepared: List[Tuple[str, Dict[str, Any]]] = []
-        seen_in_batch: set[str] = set()
-        for item in items:
-            d_hash = generate_dedup_hash(
-                item["business_name"],
-                item.get("phone_number"),
-                item.get("address"),
-            )
-            if d_hash in seen_in_batch:
-                continue
-            seen_in_batch.add(d_hash)
-            prepared.append((d_hash, item))
-
-        all_hashes = [h for h, _ in prepared]
-        session = self.Session()
-        try:
-            stmt = select(BusinessEntity).where(BusinessEntity.dedup_hash.in_(all_hashes))
-            existing_rows = session.execute(stmt).scalars().all()
-            existing_map: Dict[str, BusinessEntity] = {e.dedup_hash: e for e in existing_rows}
-
-            new_entities: List[BusinessEntity] = []
-            ordered_entities: List[BusinessEntity] = []
-            now_ts = datetime.now(timezone.utc)
-
-            for d_hash, item in prepared:
-                website_url = item.get("website_url")
-                enrichment_status = item.get("enrichment_status")
-                if enrichment_status is None:
-                    enrichment_status = EnrichmentStatus.NO_WEBSITE if not website_url else EnrichmentStatus.PENDING
-
-                existing = existing_map.get(d_hash)
-                if existing:
-                    if not existing.category and item.get("category"):
-                        existing.category = item["category"]
-                    if not existing.address and item.get("address"):
-                        existing.address = item["address"]
-                    if not existing.phone_number and item.get("phone_number"):
-                        existing.phone_number = item["phone_number"]
-                    if not existing.website_url and website_url:
-                        existing.website_url = website_url
-                        if existing.enrichment_status == EnrichmentStatus.NO_WEBSITE:
-                            existing.enrichment_status = EnrichmentStatus.PENDING
-                    if item.get("rating") is not None:
-                        existing.rating = item["rating"]
-                    if item.get("reviews_count") is not None:
-                        existing.reviews_count = item["reviews_count"]
-                    if existing.latitude is None and item.get("latitude") is not None:
-                        existing.latitude = item["latitude"]
-                    if existing.longitude is None and item.get("longitude") is not None:
-                        existing.longitude = item["longitude"]
-                    if (not existing.kecamatan or existing.kecamatan == "Tidak Diketahui") and item.get("kecamatan"):
-                        existing.kecamatan = item["kecamatan"]
-                    if (not existing.kota_kabupaten or existing.kota_kabupaten == "Tidak Diketahui") and item.get("kota_kabupaten"):
-                        existing.kota_kabupaten = item["kota_kabupaten"]
-                    if not existing.google_url and item.get("google_url"):
-                        existing.google_url = item["google_url"]
-                    ordered_entities.append(existing)
-                else:
-                    new_ent = BusinessEntity(
-                        search_keyword=item["search_keyword"],
-                        business_name=item["business_name"],
-                        category=item.get("category"),
-                        address=item.get("address"),
-                        phone_number=item.get("phone_number"),
-                        website_url=website_url,
-                        rating=item.get("rating"),
-                        reviews_count=item.get("reviews_count"),
-                        latitude=item.get("latitude"),
-                        longitude=item.get("longitude"),
-                        kecamatan=item.get("kecamatan"),
-                        kota_kabupaten=item.get("kota_kabupaten"),
-                        google_url=item.get("google_url"),
-                        is_replied=False,
-                        reply_notes="",
-                        enrichment_status=enrichment_status,
-                        scraped_at=now_ts,
-                        dedup_hash=d_hash,
-                    )
-                    new_entities.append(new_ent)
-                    ordered_entities.append(new_ent)
-
-            if new_entities:
-                session.add_all(new_entities)
-            session.commit()
-            return [e.to_dict() for e in ordered_entities]
         except Exception:
             session.rollback()
             raise
@@ -478,46 +311,15 @@ class DatabaseManager:
 
     def get_all_entities_as_dicts(self, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Returns all entities as dictionaries ordered newest-first for dashboard & export.
+        Returns all entities as dictionaries for export and metric evaluation.
         """
         session = self.Session()
         try:
-            stmt = select(BusinessEntity).order_by(BusinessEntity.scraped_at.desc())
+            stmt = select(BusinessEntity)
             if keyword:
                 stmt = stmt.where(BusinessEntity.search_keyword == keyword)
             entities = session.execute(stmt).scalars().all()
             return [e.to_dict() for e in entities]
-        finally:
-            session.close()
-
-    def update_outreach_batch(self, updates: List[Dict[str, Any]]) -> int:
-        """
-        Persist manual outreach status (is_replied checkbox & reply_notes) to the database.
-        Each item in updates should have: id, is_replied, reply_notes.
-        Returns the number of rows updated.
-        """
-        if not updates:
-            return 0
-        session = self.Session()
-        updated_count = 0
-        now_ts = datetime.now(timezone.utc)
-        try:
-            for item in updates:
-                entity_id = item.get("id")
-                if not entity_id:
-                    continue
-                stmt = select(BusinessEntity).where(BusinessEntity.id == entity_id)
-                entity = session.execute(stmt).scalar_one_or_none()
-                if entity:
-                    entity.is_replied = bool(item.get("is_replied", False))
-                    entity.reply_notes = str(item.get("reply_notes") or "").strip()
-                    entity.outreach_updated_at = now_ts
-                    updated_count += 1
-            session.commit()
-            return updated_count
-        except Exception:
-            session.rollback()
-            raise
         finally:
             session.close()
 
